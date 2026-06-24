@@ -4,85 +4,78 @@
     <h1>Vendor analytics</h1>
     <p class="subtitle">A clear look at today’s orders and revenue.</p>
 
+    <div v-if="loading" class="state-card analytics-state"><span class="spinner"></span><div><h3>Calculating today’s numbers…</h3></div></div>
+    <div v-else-if="error" class="state-card state-card--error analytics-state"><span>!</span><div><h3>Analytics unavailable</h3><p>{{ error }}</p></div><button class="button button--small" @click="fetchAnalytics">Try again</button></div>
+
+    <template v-else>
     <div class="grid">
       <div class="card">
         <span class="card-label">Today</span>
         <h3>Orders Today</h3>
-        <p>{{ ordersToday }}</p>
+        <p>{{ analytics.orders_today }}</p>
       </div>
       <div class="card">
         <span class="card-label">Sales</span>
         <h3>Revenue Today</h3>
-        <p>RM {{ revenueToday.toFixed(2) }}</p>
+        <p>RM {{ money(analytics.revenue_today) }}</p>
       </div>
       <div class="card">
         <span class="card-label">Popular</span>
         <h3>Top Item</h3>
-        <p>{{ topItem }}</p>
+        <p>{{ analytics.top_item || 'No sales yet' }}</p>
       </div>
       <div class="card">
         <span class="card-label">Busiest</span>
         <h3>Peak Hour</h3>
-        <p>{{ peakHour }}</p>
+        <p>{{ analytics.peak_hour || 'No peak yet' }}</p>
+      </div>
+      <div class="card">
+        <span class="card-label">In queue</span>
+        <h3>Pending Orders</h3>
+        <p>{{ analytics.pending_orders }}</p>
       </div>
     </div>
 
     <div class="card summary-card">
-      <div class="summary-heading"><div><h2>Order status</h2><p>Today’s order distribution</p></div><strong>{{ ordersToday }} total</strong></div>
+      <div class="summary-heading"><div><h2>Order status</h2><p>Today’s order distribution</p></div><strong>{{ analytics.orders_today }} total</strong></div>
       <div v-for="item in statusSummary" :key="item.status" class="summary-row">
         <span><i :class="`dot dot--${item.key}`"></i>{{ item.status }}</span>
         <strong>{{ item.count }}</strong>
       </div>
     </div>
+    </template>
   </section>
 </template>
 
 <script setup>
-import { computed, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
+import { useRouter } from 'vue-router'
+import api from '../services/api'
 
-const orders = ref([
-  {
-    id: '1001',
-    status: 'placed',
-    total: 10.5,
-    pickupTime: '12:30 PM',
-    items: [{ name: 'Nasi Goreng Kampung', qty: 1 }]
-  },
-  {
-    id: '1002',
-    status: 'preparing',
-    total: 8.0,
-    pickupTime: '12:45 PM',
-    items: [{ name: 'Chicken Rice', qty: 1 }]
-  },
-  {
-    id: '1003',
-    status: 'ready',
-    total: 6.5,
-    pickupTime: '1:00 PM',
-    items: [{ name: 'Vegetarian Fried Noodles', qty: 1 }]
+const router = useRouter()
+const analytics = ref(null)
+const loading = ref(true)
+const error = ref('')
+
+async function fetchAnalytics() {
+  loading.value = true
+  error.value = ''
+
+  try {
+    const { data } = await api.get('/vendor/analytics')
+    analytics.value = data.analytics
+  } catch (requestError) {
+    if (requestError.response?.status === 401) {
+      localStorage.removeItem('token')
+      localStorage.removeItem('user')
+      await router.push('/login')
+      return
+    }
+    error.value = requestError.response?.data?.error || 'Please check the API and try again.'
+  } finally {
+    loading.value = false
   }
-])
-
-const ordersToday = computed(() => orders.value.length)
-
-const revenueToday = computed(() => {
-  return orders.value.reduce((sum, order) => sum + order.total, 0)
-})
-
-const topItem = computed(() => {
-  const count = {}
-
-  orders.value.forEach(order => {
-    order.items.forEach(item => {
-      count[item.name] = (count[item.name] || 0) + item.qty
-    })
-  })
-
-  return Object.entries(count).sort((a, b) => b[1] - a[1])[0]?.[0] || 'N/A'
-})
-
-const peakHour = computed(() => '12:00 PM - 1:00 PM')
+}
 
 const statusSummary = computed(() => {
   const statuses = ['placed', 'preparing', 'ready', 'collected']
@@ -90,9 +83,15 @@ const statusSummary = computed(() => {
   return statuses.map(status => ({
     key: status,
     status: status.charAt(0).toUpperCase() + status.slice(1),
-    count: orders.value.filter(order => order.status === status).length
+    count: analytics.value?.status_summary?.[status] ?? 0
   }))
 })
+
+function money(value) {
+  return Number(value).toFixed(2)
+}
+
+onMounted(fetchAnalytics)
 </script>
 
 <style scoped>
@@ -114,9 +113,13 @@ const statusSummary = computed(() => {
   margin-bottom: 0;
 }
 
+.analytics-state {
+  margin-top: 32px;
+}
+
 .grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 16px;
   margin: 32px 0;
 }
@@ -219,6 +222,12 @@ const statusSummary = computed(() => {
 .dot--preparing { background: #4e7fd0; }
 .dot--ready { background: #27a75f; }
 .dot--collected { background: #9ba39e; }
+
+@media (max-width: 1100px) {
+  .grid {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
 
 @media (max-width: 900px) {
   .grid {
