@@ -182,7 +182,7 @@ $app->get('/api/vendors/{id}/menu', function (
         return $item;
     }, $statement->fetchAll());
 
-    return jsonResponse($response, ['vendor' => $vendorData, 'menu' => $items]);
+    return jsonResponse($response, ['vendor' => $vendorData, 'menu_items' => $items]);
 });
 
 $app->post('/api/orders', function (ServerRequestInterface $request, ResponseInterface $response) {
