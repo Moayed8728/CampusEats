@@ -1,0 +1,1 @@
+<template><section class="state-card"><span>CE</span><div><span class="eyebrow">Admin</span><h1>Campus overview</h1><p>Your account is ready. Administrative tools are planned for the next CampusEats milestone.</p></div></section></template>
