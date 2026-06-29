@@ -10,10 +10,6 @@ import VendorAnalytics from '../views/VendorAnalytics.vue'
 import OrderTracking from '../views/OrderTracking.vue'
 import OrderHistory from '../views/OrderHistory.vue'
 import AdminPage from '../views/AdminPage.vue'
-import AdminUsers from '../views/AdminUsers.vue'
-import AdminVendors from '../views/AdminVendors.vue'
-import AdminOrders from '../views/AdminOrders.vue'
-import NotificationsPage from '../views/NotificationsPage.vue'
 
 const routes = [
   { path: '/', name: 'home', component: StudentHome, meta: { requiresAuth: true, roles: ['student'] } },
@@ -21,9 +17,6 @@ const routes = [
   { path: '/register', name: 'register', component: RegisterPage, meta: { guestOnly: true } },
   { path: '/vendors/:id/menu', name: 'vendor-menu', component: VendorMenu, meta: { requiresAuth: true, roles: ['student'] } },
   { path: '/cart', name: 'cart', component: CartPage, meta: { requiresAuth: true, roles: ['student'] } },
-  { path: '/notifications', name: 'notifications', component: NotificationsPage, meta: { requiresAuth: true, roles: ['student'] } },
-  { path: '/orders/history', name: 'order-history', component: OrderHistory, meta: { requiresAuth: true, roles: ['student'] } },
-  { path: '/orders/:id/tracking', name: 'order-tracking', component: OrderTracking, meta: { requiresAuth: true, roles: ['student'] } },
   { path: '/orders/:id', name: 'order-status', component: OrderStatus, meta: { requiresAuth: true } },
   { path: '/vendor/dashboard', name: 'vendor-dashboard', component: VendorDashboard, meta: { requiresAuth: true, roles: ['vendor'] } },
   { path: '/vendor/analytics', name: 'vendor-analytics', component: VendorAnalytics, meta: { requiresAuth: true, roles: ['vendor'] } },
