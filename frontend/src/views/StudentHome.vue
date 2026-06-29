@@ -24,13 +24,13 @@
       <span v-if="!loading && !error" class="result-count">{{ vendors.length }} kitchens</span>
     </div>
 
-    <div v-if="loading" class="vendor-grid" aria-label="Loading vendors">
-      <div v-for="n in 3" :key="n" class="vendor-card skeleton-card"><span></span><i></i><i></i></div>
+    <div v-if="loading" class="state-card">
+      <span class="spinner"></span><div><h3>Loading vendors...</h3><p>Finding open kitchens on campus.</p></div>
     </div>
 
     <div v-else-if="error" class="state-card state-card--error">
-      <span>!</span><div><h3>We couldn’t load the kitchens.</h3><p>{{ error }}</p></div>
-      <button class="button button--small" @click="fetchVendors">Try again</button>
+      <span>!</span><div><h3>Unable to load vendors.</h3><p>{{ error }}</p></div>
+      <button class="button button--small" @click="fetchVendors">Retry</button>
     </div>
 
     <div v-else-if="vendors.length" class="vendor-grid">
@@ -49,7 +49,7 @@
       </article>
     </div>
 
-    <div v-else class="state-card"><span>☕</span><div><h3>No kitchens are open yet.</h3><p>Check back in a little while.</p></div></div>
+    <div v-else class="state-card"><span>CE</span><div><h3>No vendors available.</h3><p>Check back in a little while.</p></div></div>
   </section>
 </template>
 

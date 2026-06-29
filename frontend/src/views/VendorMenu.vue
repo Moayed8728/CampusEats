@@ -7,8 +7,8 @@
     </div>
 
     <div v-if="notice" class="toast" role="status">{{ notice }}</div>
-    <div v-if="loading" class="state-card"><span class="spinner"></span><div><h3>Bringing out the menu…</h3></div></div>
-    <div v-else-if="error" class="state-card state-card--error"><span>!</span><div><h3>Menu unavailable</h3><p>{{ error }}</p></div><button class="button button--small" @click="fetchMenu">Try again</button></div>
+    <div v-if="loading" class="state-card"><span class="spinner"></span><div><h3>Loading menu...</h3><p>Checking today’s available items.</p></div></div>
+    <div v-else-if="error" class="state-card state-card--error"><span>!</span><div><h3>Unable to load menu.</h3><p>{{ error }}</p></div><button class="button button--small" @click="fetchMenu">Retry</button></div>
     <div v-else-if="menuItems.length" class="menu-grid">
       <article v-for="item in menuItems" :key="item.id" class="menu-card">
         <div class="food-art"><span>{{ foodEmoji(item.name) }}</span><small>RM {{ money(item.price) }}</small></div>
@@ -24,7 +24,7 @@
         </div>
       </article>
     </div>
-    <div v-else class="state-card"><span>🍽</span><div><h3>Nothing on the counter right now.</h3><p>Please check again later.</p></div></div>
+    <div v-else class="state-card"><span>CE</span><div><h3>No menu items available.</h3><p>Please check again later.</p></div></div>
   </section>
 </template>
 

@@ -2,13 +2,29 @@
   <section class="dashboard">
     <div class="page-heading">
       <div>
-        <span class="eyebrow">Sunday, 21 June</span>
-        <h1>Good afternoon.</h1>
+        <span class="eyebrow">{{ todayLabel }}</span>
+        <h1>Good {{ greeting }}.</h1>
         <p>Here’s what’s happening at Campus Nasi Corner today.</p>
       </div>
       <span class="open-badge"><span></span> Store is open</span>
     </div>
 
+    <p v-if="successMessage" class="feedback feedback--success">✓ {{ successMessage }}</p>
+    <p v-if="actionError" class="feedback feedback--error">! {{ actionError }}</p>
+
+    <div v-if="loading" class="state-card dashboard-state">
+      <span class="spinner"></span><div><h3>Loading orders...</h3><p>Checking the kitchen queue.</p></div>
+    </div>
+    <div v-else-if="error" class="state-card state-card--error dashboard-state">
+      <span>!</span><div><h3>Unable to load orders.</h3><p>{{ error }}</p></div>
+      <button class="button button--small" @click="fetchOrders">Retry</button>
+    </div>
+    <div v-else-if="!orders.length" class="state-card dashboard-state">
+      <span>CE</span><div><h3>No incoming orders.</h3><p>New customer orders will appear here when you refresh.</p></div>
+      <button class="button button--small" @click="fetchOrders">Refresh</button>
+    </div>
+
+    <template v-else>
     <div class="analytics-grid">
       <div class="stat-card">
         <span class="stat-icon">01</span>
@@ -40,97 +56,92 @@
     </div>
 
     <div class="columns">
-      <div class="order-column">
-        <div class="column-heading"><h2>Placed</h2><span>{{ ordersByStatus('placed').length }}</span></div>
+      <div v-for="group in statusGroups" :key="group.key" class="order-column" :class="`order-column--${group.key}`">
+        <div class="column-heading"><h2><i :class="`status-dot status-dot--${group.key}`"></i>{{ group.label }}</h2><span>{{ group.orders.length }}</span></div>
         <OrderCard
-          v-for="order in ordersByStatus('placed')"
+          v-for="order in group.orders"
           :key="order.id"
           :order="order"
+          :updating="updatingOrderId === order.id"
           @update-status="updateStatus"
         />
-        <p v-if="!ordersByStatus('placed').length" class="empty-state">No placed orders</p>
-      </div>
-
-      <div class="order-column">
-        <div class="column-heading"><h2>Preparing</h2><span>{{ ordersByStatus('preparing').length }}</span></div>
-        <OrderCard
-          v-for="order in ordersByStatus('preparing')"
-          :key="order.id"
-          :order="order"
-          @update-status="updateStatus"
-        />
-        <p v-if="!ordersByStatus('preparing').length" class="empty-state">Nothing being prepared</p>
-      </div>
-
-      <div class="order-column">
-        <div class="column-heading"><h2>Ready</h2><span>{{ ordersByStatus('ready').length }}</span></div>
-        <OrderCard
-          v-for="order in ordersByStatus('ready')"
-          :key="order.id"
-          :order="order"
-          @update-status="updateStatus"
-        />
-        <p v-if="!ordersByStatus('ready').length" class="empty-state">No orders ready</p>
-      </div>
-
-      <div class="order-column">
-        <div class="column-heading"><h2>Collected</h2><span>{{ ordersByStatus('collected').length }}</span></div>
-        <OrderCard
-          v-for="order in ordersByStatus('collected')"
-          :key="order.id"
-          :order="order"
-          @update-status="updateStatus"
-        />
-        <p v-if="!ordersByStatus('collected').length" class="empty-state">No collected orders yet</p>
+        <p v-if="!group.orders.length" class="empty-state">{{ group.empty }}</p>
       </div>
     </div>
+    </template>
   </section>
 </template>
 
 <script setup>
-import { computed, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import OrderCard from '../components/OrderCard.vue'
+import api from '../services/api'
 
-const orders = ref([
-  {
-    id: '1001',
-    status: 'placed',
-    pickupTime: '12:30 PM',
-    total: 10.50,
-    items: [
-      { name: 'Nasi Goreng Kampung', qty: 1 },
-      { name: 'Iced Milo', qty: 1 }
-    ]
-  },
-  {
-    id: '1002',
-    status: 'preparing',
-    pickupTime: '12:45 PM',
-    total: 8.00,
-    items: [
-      { name: 'Chicken Rice', qty: 1 }
-    ]
-  },
-  {
-    id: '1003',
-    status: 'ready',
-    pickupTime: '1:00 PM',
-    total: 6.50,
-    items: [
-      { name: 'Vegetarian Fried Noodles', qty: 1 }
-    ]
+const router = useRouter()
+const orders = ref([])
+const loading = ref(true)
+const error = ref('')
+const successMessage = ref('')
+const actionError = ref('')
+const updatingOrderId = ref(null)
+let messageTimer
+
+const todayLabel = new Intl.DateTimeFormat('en-MY', {
+  weekday: 'long', day: 'numeric', month: 'long'
+}).format(new Date())
+const hour = new Date().getHours()
+const greeting = hour < 12 ? 'morning' : hour < 18 ? 'afternoon' : 'evening'
+
+async function fetchOrders() {
+  loading.value = true
+  error.value = ''
+
+  try {
+    const { data } = await api.get('/vendor/orders')
+    orders.value = data.orders ?? []
+  } catch (requestError) {
+    if (requestError.response?.status === 401) {
+      localStorage.removeItem('token')
+      localStorage.removeItem('user')
+      await router.push('/login')
+      return
+    }
+    error.value = requestError.response?.data?.error || 'Please check the API and try again.'
+  } finally {
+    loading.value = false
   }
-])
+}
 
 function ordersByStatus(status) {
   return orders.value.filter(order => order.status === status)
 }
 
-function updateStatus(orderId, newStatus) {
-  const order = orders.value.find(order => order.id === orderId)
+const statusGroups = computed(() => [
+  { key: 'placed', label: 'Placed', empty: 'No placed orders', orders: ordersByStatus('placed') },
+  { key: 'preparing', label: 'Preparing', empty: 'Nothing being prepared', orders: ordersByStatus('preparing') },
+  { key: 'ready', label: 'Ready', empty: 'No orders ready', orders: ordersByStatus('ready') },
+  { key: 'collected', label: 'Collected', empty: 'No collected orders yet', orders: ordersByStatus('collected') }
+])
 
-  if (order) {
-    order.status = newStatus
+async function updateStatus(orderId, newStatus) {
+  updatingOrderId.value = orderId
+  actionError.value = ''
+
+  try {
+    const { data } = await api.patch(`/orders/${orderId}/status`, { status: newStatus })
+    const order = orders.value.find((item) => item.id === orderId)
+    if (order) order.status = data.order?.status ?? newStatus
+
+    successMessage.value = `Order #${orderId.split('-')[0].toUpperCase()} moved to ${newStatus}.`
+    clearTimeout(messageTimer)
+    messageTimer = setTimeout(() => { successMessage.value = '' }, 3500)
+  } catch (requestError) {
+    actionError.value = requestError.response?.data?.error || 'The order status could not be updated.'
+    clearTimeout(messageTimer)
+    messageTimer = setTimeout(() => { actionError.value = '' }, 4500)
+  } finally {
+    updatingOrderId.value = null
   }
 }
 
@@ -153,11 +164,43 @@ const topItem = computed(() => {
 
   return Object.entries(itemCount).sort((a, b) => b[1] - a[1])[0]?.[0] || 'N/A'
 })
+
+onMounted(fetchOrders)
 </script>
 
 <style scoped>
 .dashboard {
   width: 100%;
+}
+
+.dashboard-state {
+  margin-top: 32px;
+}
+
+.feedback {
+  position: fixed;
+  z-index: 20;
+  top: 92px;
+  left: 50%;
+  margin: 0;
+  padding: 11px 17px;
+  transform: translateX(-50%);
+  border-radius: 999px;
+  font-size: 0.8rem;
+  font-weight: 800;
+  box-shadow: var(--shadow);
+}
+
+.feedback--success {
+  color: var(--brand-dark);
+  background: #edf9f0;
+  border: 1px solid #b9dbc4;
+}
+
+.feedback--error {
+  color: #8b3831;
+  background: #fff0ee;
+  border: 1px solid #efc1bc;
 }
 
 .page-heading {
@@ -283,6 +326,9 @@ const topItem = computed(() => {
 }
 
 .column-heading h2 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   margin: 0;
   font-size: 0.92rem;
 }
@@ -311,6 +357,17 @@ const topItem = computed(() => {
   text-align: center;
   font-size: 0.78rem;
 }
+
+.status-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #d9a927;
+}
+
+.status-dot--preparing { background: #4e7fd0; }
+.status-dot--ready { background: #27a75f; }
+.status-dot--collected { background: #9ba39e; }
 
 @media (max-width: 900px) {
   .analytics-grid {

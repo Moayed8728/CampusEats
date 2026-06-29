@@ -4,9 +4,16 @@
       <RouterLink class="brand" to="/"><span class="brand-mark"><i></i><i></i></span><span>CampusEats</span></RouterLink>
       <button class="menu-toggle" aria-label="Toggle navigation" @click="menuOpen=!menuOpen">{{ menuOpen?'×':'☰' }}</button>
       <nav :class="{open:menuOpen}" aria-label="Main navigation" @click="menuOpen=false">
-        <RouterLink to="/">Home</RouterLink>
-        <RouterLink v-if="auth.role==='student'" to="/cart">Cart <span v-if="cart.count" class="nav-count">{{ cart.count }}</span></RouterLink>
+        <template v-if="auth.role==='student'">
+          <RouterLink to="/">Home</RouterLink>
+          <RouterLink to="/cart">Cart <span v-if="cart.count" class="nav-count">{{ cart.count }}</span></RouterLink>
+          <RouterLink to="/recommendations">Recommendations</RouterLink>
+          <RouterLink to="/ai-assistant">AI Assistant</RouterLink>
+          <RouterLink to="/notifications">Notifications</RouterLink>
+          <RouterLink to="/orders/history">Order History</RouterLink>
+        </template>
         <template v-if="auth.role==='vendor'"><RouterLink to="/vendor/dashboard">Dashboard</RouterLink><RouterLink to="/vendor/analytics">Analytics</RouterLink></template>
+        <template v-if="auth.role==='admin'"><RouterLink to="/admin">Dashboard</RouterLink><RouterLink to="/admin/users">Users</RouterLink><RouterLink to="/admin/vendors">Vendors</RouterLink><RouterLink to="/admin/orders">Orders</RouterLink></template>
       </nav>
       <div class="account-actions">
         <template v-if="auth.isAuthenticated"><span class="user-chip"><i>{{ userInitial }}</i><span><small>{{ auth.role }}</small>{{ auth.user?.name }}</span></span><button class="logout-button" @click="logout">Logout</button></template>

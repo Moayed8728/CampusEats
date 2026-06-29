@@ -3,7 +3,7 @@
     <div class="page-intro"><span class="eyebrow">Almost yours</span><h1>Your pickup bag</h1><p>Check the details, choose a time, and we’ll send it to the kitchen.</p></div>
 
     <div v-if="!cart.items.length" class="empty-cart">
-      <span>◇</span><h2>Your bag is waiting.</h2><p>Add something delicious from a campus kitchen.</p><RouterLink class="button" to="/">Browse kitchens</RouterLink>
+      <span>CE</span><h2>Your cart is empty.</h2><p>Add something delicious from a campus kitchen.</p><RouterLink class="button" to="/">Browse vendors</RouterLink>
     </div>
 
     <div v-else class="cart-layout">
