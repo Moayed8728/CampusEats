@@ -49,6 +49,13 @@ $findOwnedVendor = static function (PDO $db, string $userId): ?array {
     return $statement->fetch() ?: null;
 };
 
+$createNotification = static function (PDO $db, string $userId, string $message): void {
+    $statement = $db->prepare(
+        'INSERT INTO notifications (id, user_id, message, is_read) VALUES (?, ?, ?, 0)'
+    );
+    $statement->execute([uuid(), $userId, $message]);
+};
+
 $app->get('/api/health', function (ServerRequestInterface $request, ResponseInterface $response) {
     return jsonResponse($response, [
         'status' => 'ok',
@@ -73,8 +80,8 @@ $app->post('/api/auth/register', function (ServerRequestInterface $request, Resp
     if (!in_array($role, ['student', 'vendor', 'admin'], true)) {
         return jsonResponse($response, ['error' => 'Role must be student, vendor, or admin'], 400);
     }
-    if (strlen((string) $data['password']) < 8) {
-        return jsonResponse($response, ['error' => 'Password must be at least 8 characters'], 400);
+    if (strlen((string) $data['password']) < 6) {
+        return jsonResponse($response, ['error' => 'Password must be at least 6 characters'], 400);
     }
 
     $db = Database::connect();
@@ -182,8 +189,74 @@ $app->get('/api/vendors/{id}/menu', function (
         return $item;
     }, $statement->fetchAll());
 
-    return jsonResponse($response, ['vendor' => $vendorData, 'menu' => $items]);
+    return jsonResponse($response, ['vendor' => $vendorData, 'menu_items' => $items]);
 });
+
+$app->get('/api/vendors/{id}/reviews', function (
+    ServerRequestInterface $request,
+    ResponseInterface $response,
+    array $args
+) {
+    $db = Database::connect();
+    $vendor = $db->prepare('SELECT id FROM vendors WHERE id = ?');
+    $vendor->execute([$args['id']]);
+    if (!$vendor->fetch()) {
+        return jsonResponse($response, ['error' => 'Vendor not found'], 404);
+    }
+
+    $statement = $db->prepare(
+        'SELECT r.id, u.name AS student_name, r.rating, r.comment, r.created_at
+         FROM reviews r
+         JOIN users u ON u.id = r.student_id
+         WHERE r.vendor_id = ?
+         ORDER BY r.created_at DESC'
+    );
+    $statement->execute([$args['id']]);
+    $reviews = array_map(static function (array $review): array {
+        $review['rating'] = (int) $review['rating'];
+        return $review;
+    }, $statement->fetchAll());
+
+    return jsonResponse($response, ['reviews' => $reviews]);
+});
+
+$app->post('/api/reviews', function (ServerRequestInterface $request, ResponseInterface $response) {
+    $data = (array) $request->getParsedBody();
+    $missing = validateRequiredFields($data, ['vendor_id', 'rating']);
+
+    if ($missing) {
+        return jsonResponse($response, ['error' => 'Missing required fields', 'fields' => $missing], 400);
+    }
+
+    $rating = filter_var($data['rating'], FILTER_VALIDATE_INT, [
+        'options' => ['min_range' => 1, 'max_range' => 5],
+    ]);
+    if ($rating === false) {
+        return jsonResponse($response, ['error' => 'Rating must be between 1 and 5'], 400);
+    }
+
+    $comment = trim((string) ($data['comment'] ?? ''));
+    $db = Database::connect();
+    $vendor = $db->prepare('SELECT id FROM vendors WHERE id = ?');
+    $vendor->execute([(string) $data['vendor_id']]);
+    if (!$vendor->fetch()) {
+        return jsonResponse($response, ['error' => 'Vendor not found'], 404);
+    }
+
+    $auth = getAuthUser($request);
+    $statement = $db->prepare(
+        'INSERT INTO reviews (id, student_id, vendor_id, rating, comment) VALUES (?, ?, ?, ?, ?)'
+    );
+    $statement->execute([
+        uuid(),
+        $auth['sub'],
+        (string) $data['vendor_id'],
+        $rating,
+        $comment === '' ? null : $comment,
+    ]);
+
+    return jsonResponse($response, ['message' => 'Review submitted'], 201);
+})->add(new RoleMiddleware(['student']))->add(new JwtMiddleware());
 
 $app->post('/api/orders', function (ServerRequestInterface $request, ResponseInterface $response) {
     $data = (array) $request->getParsedBody();
@@ -296,9 +369,29 @@ $app->get('/api/orders/{id}', function (
         return jsonResponse($response, ['error' => 'You cannot view this order'], 403);
     }
 
-    unset($order['customer_id'], $order['vendor_id']);
+    unset($order['customer_id']);
     return jsonResponse($response, ['order' => $order]);
 })->add(new JwtMiddleware());
+
+$app->get('/api/student/orders', function (
+    ServerRequestInterface $request,
+    ResponseInterface $response
+) use ($fetchOrder) {
+    $db = Database::connect();
+    $auth = getAuthUser($request);
+
+    $statement = $db->prepare('SELECT id FROM orders WHERE customer_id = ? ORDER BY created_at DESC');
+    $statement->execute([$auth['sub']]);
+
+    $orders = [];
+    foreach ($statement->fetchAll(PDO::FETCH_COLUMN) as $orderId) {
+        $order = $fetchOrder($db, $orderId);
+        unset($order['customer_id'], $order['vendor_id'], $order['customer_name'], $order['items']);
+        $orders[] = $order;
+    }
+
+    return jsonResponse($response, ['orders' => $orders]);
+})->add(new RoleMiddleware(['student']))->add(new JwtMiddleware());
 
 $app->get('/api/vendor/orders', function (
     ServerRequestInterface $request,
@@ -326,7 +419,7 @@ $app->patch('/api/orders/{id}/status', function (
     ServerRequestInterface $request,
     ResponseInterface $response,
     array $args
-) use ($fetchOrder, $findOwnedVendor) {
+) use ($fetchOrder, $findOwnedVendor, $createNotification) {
     $data = (array) $request->getParsedBody();
     if (validateRequiredFields($data, ['status'])) {
         return jsonResponse($response, ['error' => 'status is required'], 400);
@@ -350,7 +443,7 @@ $app->patch('/api/orders/{id}/status', function (
 
     try {
         $db->beginTransaction();
-        $statement = $db->prepare('SELECT status, vendor_id FROM orders WHERE id = ? FOR UPDATE');
+        $statement = $db->prepare('SELECT status, vendor_id, customer_id FROM orders WHERE id = ? FOR UPDATE');
         $statement->execute([$args['id']]);
         $order = $statement->fetch();
 
@@ -371,6 +464,11 @@ $app->patch('/api/orders/{id}/status', function (
 
         $update = $db->prepare('UPDATE orders SET status = ? WHERE id = ?');
         $update->execute([$nextStatus, $args['id']]);
+        if ($nextStatus === 'ready') {
+            $createNotification($db, $order['customer_id'], 'Your order is ready for pickup.');
+        } elseif ($nextStatus === 'preparing') {
+            $createNotification($db, $order['customer_id'], 'Your order is being prepared.');
+        }
         $db->commit();
     } catch (Throwable $e) {
         if ($db->inTransaction()) {
@@ -383,6 +481,41 @@ $app->patch('/api/orders/{id}/status', function (
     unset($updated['customer_id'], $updated['vendor_id']);
     return jsonResponse($response, ['order' => $updated]);
 })->add(new RoleMiddleware(['vendor']))->add(new JwtMiddleware());
+
+$app->get('/api/notifications', function (ServerRequestInterface $request, ResponseInterface $response) {
+    $db = Database::connect();
+    $auth = getAuthUser($request);
+    $statement = $db->prepare(
+        'SELECT id, message, is_read, created_at
+         FROM notifications
+         WHERE user_id = ?
+         ORDER BY created_at DESC'
+    );
+    $statement->execute([$auth['sub']]);
+    $notifications = array_map(static function (array $notification): array {
+        $notification['is_read'] = (bool) $notification['is_read'];
+        return $notification;
+    }, $statement->fetchAll());
+
+    return jsonResponse($response, ['notifications' => $notifications]);
+})->add(new JwtMiddleware());
+
+$app->patch('/api/notifications/{id}/read', function (
+    ServerRequestInterface $request,
+    ResponseInterface $response,
+    array $args
+) {
+    $db = Database::connect();
+    $auth = getAuthUser($request);
+    $statement = $db->prepare('UPDATE notifications SET is_read = 1 WHERE id = ? AND user_id = ?');
+    $statement->execute([$args['id'], $auth['sub']]);
+
+    if ($statement->rowCount() === 0) {
+        return jsonResponse($response, ['error' => 'Notification not found'], 404);
+    }
+
+    return jsonResponse($response, ['message' => 'Notification marked as read']);
+})->add(new JwtMiddleware());
 
 $app->get('/api/vendor/analytics', function (
     ServerRequestInterface $request,
@@ -446,3 +579,85 @@ $app->get('/api/vendor/analytics', function (
         'status_summary' => $statuses,
     ]]);
 })->add(new RoleMiddleware(['vendor']))->add(new JwtMiddleware());
+
+$app->get('/api/admin/summary', function (ServerRequestInterface $request, ResponseInterface $response) {
+    $db = Database::connect();
+    $summary = [
+        'total_users' => (int) $db->query('SELECT COUNT(*) FROM users')->fetchColumn(),
+        'total_vendors' => (int) $db->query('SELECT COUNT(*) FROM vendors')->fetchColumn(),
+        'total_orders' => (int) $db->query('SELECT COUNT(*) FROM orders')->fetchColumn(),
+        'total_revenue' => (float) $db->query('SELECT COALESCE(SUM(total), 0) FROM orders')->fetchColumn(),
+    ];
+
+    return jsonResponse($response, ['summary' => $summary]);
+})->add(new RoleMiddleware(['admin']))->add(new JwtMiddleware());
+
+$app->get('/api/admin/users', function (ServerRequestInterface $request, ResponseInterface $response) {
+    $db = Database::connect();
+    $users = $db->query(
+        'SELECT id, name, email, role, created_at FROM users ORDER BY created_at DESC, name'
+    )->fetchAll();
+
+    return jsonResponse($response, ['users' => $users]);
+})->add(new RoleMiddleware(['admin']))->add(new JwtMiddleware());
+
+$app->get('/api/admin/vendors', function (ServerRequestInterface $request, ResponseInterface $response) {
+    $db = Database::connect();
+    $vendors = $db->query(
+        "SELECT v.id, v.name,
+                COALESCE(v.location, 'Food Court A') AS location,
+                COALESCE(v.opening_hours, '9AM - 5PM') AS opening_hours,
+                v.is_active,
+                u.name AS owner_name
+         FROM vendors v
+         JOIN users u ON u.id = v.owner_id
+         ORDER BY v.name"
+    )->fetchAll();
+    $vendors = array_map(static function (array $vendor): array {
+        $vendor['is_active'] = (bool) $vendor['is_active'];
+        return $vendor;
+    }, $vendors);
+
+    return jsonResponse($response, ['vendors' => $vendors]);
+})->add(new RoleMiddleware(['admin']))->add(new JwtMiddleware());
+
+$app->patch('/api/admin/vendors/{id}/toggle-active', function (
+    ServerRequestInterface $request,
+    ResponseInterface $response,
+    array $args
+) {
+    $db = Database::connect();
+    $statement = $db->prepare('SELECT id, is_active FROM vendors WHERE id = ?');
+    $statement->execute([$args['id']]);
+    $vendor = $statement->fetch();
+    if (!$vendor) {
+        return jsonResponse($response, ['error' => 'Vendor not found'], 404);
+    }
+
+    $nextActive = (int) !$vendor['is_active'];
+    $update = $db->prepare('UPDATE vendors SET is_active = ? WHERE id = ?');
+    $update->execute([$nextActive, $args['id']]);
+
+    return jsonResponse($response, ['vendor' => [
+        'id' => $args['id'],
+        'is_active' => (bool) $nextActive,
+    ]]);
+})->add(new RoleMiddleware(['admin']))->add(new JwtMiddleware());
+
+$app->get('/api/admin/orders', function (ServerRequestInterface $request, ResponseInterface $response) {
+    $db = Database::connect();
+    $statement = $db->query(
+        'SELECT o.id, u.name AS customer_name, v.name AS vendor_name,
+                o.status, o.total, o.pickup_at, o.created_at
+         FROM orders o
+         JOIN users u ON u.id = o.customer_id
+         JOIN vendors v ON v.id = o.vendor_id
+         ORDER BY o.created_at DESC'
+    );
+    $orders = array_map(static function (array $order): array {
+        $order['total'] = (float) $order['total'];
+        return $order;
+    }, $statement->fetchAll());
+
+    return jsonResponse($response, ['orders' => $orders]);
+})->add(new RoleMiddleware(['admin']))->add(new JwtMiddleware());

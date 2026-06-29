@@ -1,7 +1,7 @@
 <template>
   <section>
-    <div v-if="loading" class="state-card"><span class="spinner"></span><div><h3>Finding your order…</h3></div></div>
-    <div v-else-if="error" class="state-card state-card--error"><span>!</span><div><h3>We couldn’t open this order.</h3><p>{{ error }}</p></div><button class="button button--small" @click="fetchOrder">Try again</button></div>
+    <div v-if="loading" class="state-card"><span class="spinner"></span><div><h3>Loading order...</h3><p>Checking the latest kitchen status.</p></div></div>
+    <div v-else-if="error" class="state-card state-card--error"><span>!</span><div><h3>Unable to load order.</h3><p>{{ error }}</p></div><button class="button button--small" @click="fetchOrder">Retry</button></div>
     <template v-else-if="order">
       <div class="success-heading"><div class="success-icon">✓</div><div><span class="eyebrow">Order received</span><h1>Lunch is in motion.</h1><p>We’ll keep the status right here as the kitchen works its magic.</p></div></div>
       <div class="order-layout">
@@ -17,8 +17,10 @@
           <div class="receipt-total"><span>Total paid</span><strong>RM {{ money(order.total) }}</strong></div>
         </aside>
       </div>
+      <ReviewForm v-if="auth.role === 'student' && order.status === 'collected' && order.vendor_id" :vendor-id="order.vendor_id" />
       <RouterLink class="back-home" to="/">← Back to kitchens</RouterLink>
     </template>
+    <div v-else class="state-card"><span>CE</span><div><h3>Order not found.</h3><p>Please check your order history.</p></div><RouterLink class="button button--small" to="/orders/history">Order History</RouterLink></div>
   </section>
 </template>
 
@@ -27,8 +29,11 @@ import { onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import api from '../services/api'
 import OrderStatusTimeline from '../components/OrderStatusTimeline.vue'
+import ReviewForm from '../components/ReviewForm.vue'
+import { useAuthStore } from '../stores/auth'
 
 const route = useRoute()
+const auth = useAuthStore()
 const order = ref(null)
 const loading = ref(true)
 const error = ref('')

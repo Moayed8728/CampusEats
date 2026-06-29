@@ -2,8 +2,8 @@
   <div class="order-card">
     <div class="order-header">
       <div>
-        <h3>Order #{{ order.id }}</h3>
-        <p>Pickup: {{ order.pickupTime }}</p>
+        <h3>Order #{{ shortId(order.id) }}</h3>
+        <p>{{ order.customer_name }} · {{ formatPickup(order.pickup_at) }}</p>
       </div>
 
       <span class="status" :class="`status--${order.status}`">
@@ -18,29 +18,32 @@
     </ul>
 
     <div class="total-row">
-      <span>Total</span><strong>RM {{ order.total.toFixed(2) }}</strong>
+      <span>Total</span><strong>RM {{ Number(order.total).toFixed(2) }}</strong>
     </div>
 
     <div class="actions">
       <button
         v-if="order.status === 'placed'"
+        :disabled="updating"
         @click="$emit('update-status', order.id, 'preparing')"
       >
-        Mark Preparing
+        {{ updating ? 'Updating…' : 'Mark Preparing' }}
       </button>
 
       <button
         v-if="order.status === 'preparing'"
+        :disabled="updating"
         @click="$emit('update-status', order.id, 'ready')"
       >
-        Mark Ready
+        {{ updating ? 'Updating…' : 'Mark Ready' }}
       </button>
 
       <button
         v-if="order.status === 'ready'"
+        :disabled="updating"
         @click="$emit('update-status', order.id, 'collected')"
       >
-        Mark Collected
+        {{ updating ? 'Updating…' : 'Mark Collected' }}
       </button>
     </div>
   </div>
@@ -51,6 +54,10 @@ defineProps({
   order: {
     type: Object,
     required: true
+  },
+  updating: {
+    type: Boolean,
+    default: false
   }
 })
 
@@ -58,6 +65,19 @@ defineEmits(['update-status'])
 
 function formatStatus(status) {
   return status.charAt(0).toUpperCase() + status.slice(1)
+}
+
+function shortId(id) {
+  return id.split('-')[0].toUpperCase()
+}
+
+function formatPickup(value) {
+  if (!value) return 'Pickup time unavailable'
+
+  return new Intl.DateTimeFormat('en-MY', {
+    hour: 'numeric',
+    minute: '2-digit'
+  }).format(new Date(value.replace(' ', 'T')))
 }
 </script>
 
@@ -180,5 +200,11 @@ button {
 button:hover {
   background: var(--brand-dark);
   transform: translateY(-1px);
+}
+
+button:disabled {
+  opacity: 0.6;
+  cursor: wait;
+  transform: none;
 }
 </style>

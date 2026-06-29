@@ -26,6 +26,15 @@ $app->options('/{routes:.*}', function ($request, $response) {
 });
 
 $app->add(function (ServerRequestInterface $request, $handler) {
+    $allowedOrigins = [
+        'http://localhost:5173',
+        'http://localhost:5174',
+        'http://127.0.0.1:5173',
+        'http://127.0.0.1:5174',
+    ];
+    $origin = $request->getHeaderLine('Origin');
+    $allowOrigin = in_array($origin, $allowedOrigins, true) ? $origin : 'http://localhost:5173';
+
     if ($request->getMethod() === 'OPTIONS') {
         $response = new Response();
     } else {
@@ -33,7 +42,7 @@ $app->add(function (ServerRequestInterface $request, $handler) {
     }
 
     return $response
-        ->withHeader('Access-Control-Allow-Origin', 'http://localhost:5173')
+        ->withHeader('Access-Control-Allow-Origin', $allowOrigin)
         ->withHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization')
         ->withHeader('Access-Control-Allow-Methods', 'GET, POST, PATCH, OPTIONS')
         ->withHeader('Vary', 'Origin');
