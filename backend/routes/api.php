@@ -56,6 +56,136 @@ $createNotification = static function (PDO $db, string $userId, string $message)
     $statement->execute([uuid(), $userId, $message]);
 };
 
+$parseBoolean = static function ($value): ?bool {
+    if ($value === null || $value === '') {
+        return null;
+    }
+
+    return filter_var($value, FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE);
+};
+
+$normalizeCategory = static function (?string $category): ?string {
+    $category = strtolower(trim((string) $category));
+    $map = [
+        'rice' => 'Rice',
+        'nasi' => 'Rice',
+        'noodle' => 'Noodles',
+        'noodles' => 'Noodles',
+        'mee' => 'Noodles',
+        'drink' => 'Drinks',
+        'drinks' => 'Drinks',
+        'milo' => 'Drinks',
+        'tea' => 'Drinks',
+        'snack' => 'Snacks',
+        'snacks' => 'Snacks',
+        'wrap' => 'Snacks',
+    ];
+
+    return $map[$category] ?? ($category === '' ? null : ucfirst($category));
+};
+
+$findRecommendations = static function (PDO $db, array $filters): array {
+    $conditions = ['v.is_active = 1', 'm.in_stock = 1'];
+    $whereParams = [];
+    $selectParams = [];
+
+    if (($filters['budget'] ?? null) !== null) {
+        $conditions[] = 'm.price <= ?';
+        $whereParams[] = (float) $filters['budget'];
+    }
+    if (($filters['category'] ?? null) !== null) {
+        $conditions[] = 'LOWER(m.category) = LOWER(?)';
+        $whereParams[] = (string) $filters['category'];
+    }
+    if (($filters['halal'] ?? null) === true) {
+        $conditions[] = 'm.is_halal = 1';
+    }
+    if (($filters['vegetarian'] ?? null) === true) {
+        $conditions[] = 'm.is_vegetarian = 1';
+    }
+    if (($filters['keyword'] ?? null) !== null && trim((string) $filters['keyword']) !== '') {
+        $keyword = '%' . strtolower(trim((string) $filters['keyword'])) . '%';
+        $conditions[] = '(LOWER(m.name) LIKE ? OR LOWER(m.description) LIKE ?)';
+        $whereParams[] = $keyword;
+        $whereParams[] = $keyword;
+        $selectParams[] = $keyword;
+        $selectParams[] = $keyword;
+    }
+
+    $preferenceScore = '0';
+    if (($filters['halal'] ?? null) === true && ($filters['vegetarian'] ?? null) === true) {
+        $preferenceScore = 'm.is_halal + m.is_vegetarian';
+    } elseif (($filters['halal'] ?? null) === true) {
+        $preferenceScore = 'm.is_halal';
+    } elseif (($filters['vegetarian'] ?? null) === true) {
+        $preferenceScore = 'm.is_vegetarian';
+    }
+    $relevanceScore = (($filters['keyword'] ?? null) !== null && trim((string) $filters['keyword']) !== '')
+        ? '(CASE WHEN LOWER(m.name) LIKE ? THEN 2 WHEN LOWER(m.description) LIKE ? THEN 1 ELSE 0 END)'
+        : '0';
+
+    $sql = sprintf(
+        "SELECT m.id, m.vendor_id, v.name AS vendor_name, m.name, m.description, m.price,
+                m.category, m.is_halal, m.is_vegetarian, m.in_stock,
+                (%s) AS preference_score,
+                %s AS relevance_score
+         FROM menu_items m
+         JOIN vendors v ON v.id = m.vendor_id
+         WHERE %s
+         ORDER BY m.price ASC, preference_score DESC, relevance_score DESC, m.name ASC
+         LIMIT 20",
+        $preferenceScore,
+        $relevanceScore,
+        implode(' AND ', $conditions)
+    );
+
+    $statement = $db->prepare($sql);
+    $statement->execute([...$selectParams, ...$whereParams]);
+
+    return array_map(static function (array $item): array {
+        unset($item['preference_score'], $item['relevance_score']);
+        $item['price'] = (float) $item['price'];
+        $item['is_halal'] = (bool) $item['is_halal'];
+        $item['is_vegetarian'] = (bool) $item['is_vegetarian'];
+        $item['in_stock'] = (bool) $item['in_stock'];
+        return $item;
+    }, $statement->fetchAll());
+};
+
+$parseAiQuery = static function (string $query) use ($normalizeCategory): array {
+    $lower = strtolower($query);
+    $parsed = [
+        'budget' => null,
+        'category' => null,
+        'halal' => str_contains($lower, 'halal') ? true : null,
+        'vegetarian' => preg_match('/\b(vegetarian|veggie|veg)\b/', $lower) ? true : null,
+        'keyword' => null,
+    ];
+
+    if (preg_match('/(?:under|below|less than)\s*(?:rm)?\s*(\d+(?:\.\d{1,2})?)/i', $query, $matches)) {
+        $parsed['budget'] = (float) $matches[1];
+    } elseif (preg_match('/rm\s*(\d+(?:\.\d{1,2})?)/i', $query, $matches)) {
+        $parsed['budget'] = (float) $matches[1];
+    }
+
+    foreach (['rice', 'nasi', 'noodles', 'noodle', 'drinks', 'drink', 'snacks', 'snack'] as $categoryWord) {
+        if (str_contains($lower, $categoryWord)) {
+            $parsed['category'] = $normalizeCategory($categoryWord);
+            break;
+        }
+    }
+
+    $keywordWords = [];
+    foreach (['chicken', 'nasi', 'milo', 'tea', 'fried', 'spicy', 'rice', 'noodles', 'noodle'] as $word) {
+        if (str_contains($lower, $word)) {
+            $keywordWords[] = $word;
+        }
+    }
+    $parsed['keyword'] = $keywordWords ? implode(' ', array_unique($keywordWords)) : trim($query);
+
+    return $parsed;
+};
+
 $app->get('/api/health', function (ServerRequestInterface $request, ResponseInterface $response) {
     return jsonResponse($response, [
         'status' => 'ok',
@@ -180,17 +310,65 @@ $app->get('/api/vendors/{id}/menu', function (
     }
 
     $statement = $db->prepare(
-        'SELECT id, vendor_id, name, description, price
+        'SELECT id, vendor_id, name, description, price, category, is_halal, is_vegetarian, in_stock
          FROM menu_items WHERE vendor_id = ? AND in_stock = 1 ORDER BY name'
     );
     $statement->execute([$args['id']]);
     $items = array_map(static function (array $item): array {
         $item['price'] = (float) $item['price'];
+        $item['is_halal'] = (bool) $item['is_halal'];
+        $item['is_vegetarian'] = (bool) $item['is_vegetarian'];
+        $item['in_stock'] = (bool) $item['in_stock'];
         return $item;
     }, $statement->fetchAll());
 
     return jsonResponse($response, ['vendor' => $vendorData, 'menu_items' => $items]);
 });
+
+$app->get('/api/recommendations', function (
+    ServerRequestInterface $request,
+    ResponseInterface $response
+) use ($findRecommendations, $normalizeCategory, $parseBoolean) {
+    $query = $request->getQueryParams();
+    $budget = null;
+    if (($query['budget'] ?? '') !== '') {
+        $budget = filter_var($query['budget'], FILTER_VALIDATE_FLOAT);
+        if ($budget === false || $budget < 0) {
+            return jsonResponse($response, ['error' => 'budget must be a valid number'], 400);
+        }
+    }
+
+    $filters = [
+        'budget' => $budget,
+        'category' => $normalizeCategory($query['category'] ?? null),
+        'halal' => $parseBoolean($query['halal'] ?? null),
+        'vegetarian' => $parseBoolean($query['vegetarian'] ?? null),
+        'keyword' => trim((string) ($query['keyword'] ?? '')) ?: null,
+    ];
+
+    $db = Database::connect();
+    return jsonResponse($response, [
+        'recommendations' => $findRecommendations($db, $filters),
+    ]);
+})->add(new RoleMiddleware(['student']))->add(new JwtMiddleware());
+
+$app->post('/api/ai/query', function (
+    ServerRequestInterface $request,
+    ResponseInterface $response
+) use ($findRecommendations, $parseAiQuery) {
+    $data = (array) $request->getParsedBody();
+    if (validateRequiredFields($data, ['query'])) {
+        return jsonResponse($response, ['error' => 'query is required'], 400);
+    }
+
+    $parsed = $parseAiQuery((string) $data['query']);
+    $db = Database::connect();
+
+    return jsonResponse($response, [
+        'parsed' => $parsed,
+        'recommendations' => $findRecommendations($db, $parsed),
+    ]);
+})->add(new RoleMiddleware(['student']))->add(new JwtMiddleware());
 
 $app->get('/api/vendors/{id}/reviews', function (
     ServerRequestInterface $request,

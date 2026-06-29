@@ -60,11 +60,59 @@ CREATE TABLE IF NOT EXISTS menu_items (
     name VARCHAR(160) NOT NULL,
     description TEXT NULL,
     price DECIMAL(10,2) NOT NULL,
+    category VARCHAR(80) NULL,
+    is_halal TINYINT(1) NOT NULL DEFAULT 1,
+    is_vegetarian TINYINT(1) NOT NULL DEFAULT 0,
     in_stock TINYINT(1) NOT NULL DEFAULT 1,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT fk_menu_vendor FOREIGN KEY (vendor_id) REFERENCES vendors(id),
     INDEX idx_menu_vendor (vendor_id)
 );
+
+SET @add_menu_category = (
+    SELECT IF(
+        COUNT(*) = 0,
+        'ALTER TABLE menu_items ADD COLUMN category VARCHAR(80) NULL AFTER price',
+        'SELECT 1'
+    )
+    FROM information_schema.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME = 'menu_items'
+      AND COLUMN_NAME = 'category'
+);
+PREPARE add_menu_category_stmt FROM @add_menu_category;
+EXECUTE add_menu_category_stmt;
+DEALLOCATE PREPARE add_menu_category_stmt;
+
+SET @add_menu_is_halal = (
+    SELECT IF(
+        COUNT(*) = 0,
+        'ALTER TABLE menu_items ADD COLUMN is_halal TINYINT(1) NOT NULL DEFAULT 1 AFTER category',
+        'SELECT 1'
+    )
+    FROM information_schema.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME = 'menu_items'
+      AND COLUMN_NAME = 'is_halal'
+);
+PREPARE add_menu_is_halal_stmt FROM @add_menu_is_halal;
+EXECUTE add_menu_is_halal_stmt;
+DEALLOCATE PREPARE add_menu_is_halal_stmt;
+
+SET @add_menu_is_vegetarian = (
+    SELECT IF(
+        COUNT(*) = 0,
+        'ALTER TABLE menu_items ADD COLUMN is_vegetarian TINYINT(1) NOT NULL DEFAULT 0 AFTER is_halal',
+        'SELECT 1'
+    )
+    FROM information_schema.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME = 'menu_items'
+      AND COLUMN_NAME = 'is_vegetarian'
+);
+PREPARE add_menu_is_vegetarian_stmt FROM @add_menu_is_vegetarian;
+EXECUTE add_menu_is_vegetarian_stmt;
+DEALLOCATE PREPARE add_menu_is_vegetarian_stmt;
 
 CREATE TABLE IF NOT EXISTS orders (
     id CHAR(36) PRIMARY KEY,

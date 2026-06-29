@@ -15,16 +15,17 @@ ON DUPLICATE KEY UPDATE
     owner_id = VALUES(owner_id), name = VALUES(name), description = VALUES(description),
     location = VALUES(location), opening_hours = VALUES(opening_hours), is_active = 1;
 
-INSERT INTO menu_items (id, vendor_id, name, description, price, in_stock) VALUES
-('30000000-0000-4000-8000-000000000001', '20000000-0000-4000-8000-000000000001', 'Nasi Goreng Kampung', 'Smoky fried rice with anchovies, egg and vegetables.', 7.50, 1),
-('30000000-0000-4000-8000-000000000002', '20000000-0000-4000-8000-000000000001', 'Chicken Rice', 'Tender chicken, fragrant rice and house chilli sauce.', 8.00, 1),
-('30000000-0000-4000-8000-000000000003', '20000000-0000-4000-8000-000000000001', 'Vegetarian Fried Noodles', 'Wok-fried noodles with tofu and seasonal vegetables.', 6.50, 1),
-('30000000-0000-4000-8000-000000000004', '20000000-0000-4000-8000-000000000001', 'Spicy Chicken Wrap', 'Grilled chicken, crisp salad and sambal mayo.', 9.00, 1),
-('30000000-0000-4000-8000-000000000005', '20000000-0000-4000-8000-000000000001', 'Iced Milo', 'Classic chilled chocolate malt drink.', 3.00, 1),
-('30000000-0000-4000-8000-000000000006', '20000000-0000-4000-8000-000000000001', 'Teh O Ais Limau', 'Iced black tea with fresh lime.', 2.50, 1)
+INSERT INTO menu_items (id, vendor_id, name, description, price, category, is_halal, is_vegetarian, in_stock) VALUES
+('30000000-0000-4000-8000-000000000001', '20000000-0000-4000-8000-000000000001', 'Nasi Goreng Kampung', 'Smoky spicy fried rice with anchovies, egg and vegetables.', 7.50, 'Rice', 1, 0, 1),
+('30000000-0000-4000-8000-000000000002', '20000000-0000-4000-8000-000000000001', 'Chicken Rice', 'Steamed chicken rice served with soup and house chilli sauce.', 8.00, 'Rice', 1, 0, 1),
+('30000000-0000-4000-8000-000000000003', '20000000-0000-4000-8000-000000000001', 'Vegetarian Fried Noodles', 'Wok-fried noodles with tofu and seasonal vegetables.', 6.50, 'Noodles', 1, 1, 1),
+('30000000-0000-4000-8000-000000000004', '20000000-0000-4000-8000-000000000001', 'Spicy Chicken Wrap', 'Grilled chicken, crisp salad and sambal mayo.', 9.00, 'Snacks', 1, 0, 1),
+('30000000-0000-4000-8000-000000000005', '20000000-0000-4000-8000-000000000001', 'Iced Milo', 'Classic chilled chocolate malt drink.', 3.00, 'Drinks', 1, 1, 1),
+('30000000-0000-4000-8000-000000000006', '20000000-0000-4000-8000-000000000001', 'Teh O Ais Limau', 'Iced black tea with fresh lime.', 2.50, 'Drinks', 1, 1, 1)
 ON DUPLICATE KEY UPDATE
     vendor_id = VALUES(vendor_id), name = VALUES(name), description = VALUES(description),
-    price = VALUES(price), in_stock = VALUES(in_stock);
+    price = VALUES(price), category = VALUES(category), is_halal = VALUES(is_halal),
+    is_vegetarian = VALUES(is_vegetarian), in_stock = VALUES(in_stock);
 
 -- Dates follow the day the seed is imported so today's analytics always has demo data.
 INSERT INTO orders (id, customer_id, vendor_id, pickup_at, total, status, created_at) VALUES
