@@ -3,7 +3,7 @@
     <div class="page-heading">
       <div>
         <span class="eyebrow">Recommendations</span>
-        <h1>Find a meal that fits.</h1>
+        <h1>Smart Meal Recommendations</h1>
         <p>Filter by budget, category, and preferences before adding items to your cart.</p>
       </div>
     </div>

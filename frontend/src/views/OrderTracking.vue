@@ -2,7 +2,7 @@
   <section class="tracking">
     <span class="eyebrow">Live update</span>
     <h1>Track your order</h1>
-    <p class="subtitle">We’ll refresh this page every few seconds as your food is prepared.</p>
+    <p class="subtitle">Tracking updates automatically every 5 seconds.</p>
 
     <div v-if="loading" class="state-card tracking-state">
       <span class="spinner"></span><div><h3>Loading order...</h3><p>Checking the latest status.</p></div>
@@ -71,6 +71,10 @@ async function fetchOrder({ quiet = false } = {}) {
     const { data } = await api.get(`/orders/${route.params.id}`)
     order.value = data.order
     lastLoadedAt.value = new Date()
+    if (order.value?.status === 'collected') {
+      clearInterval(pollTimer)
+      pollTimer = null
+    }
   } catch (requestError) {
     error.value = requestError.response?.data?.error || 'Please check the order link and try again.'
   } finally {
@@ -79,6 +83,7 @@ async function fetchOrder({ quiet = false } = {}) {
 }
 
 function startPolling() {
+  if (pollTimer || order.value?.status === 'collected') return
   pollTimer = setInterval(() => {
     fetchOrder({ quiet: true })
   }, 5000)

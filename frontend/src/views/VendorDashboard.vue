@@ -11,6 +11,7 @@
 
     <p v-if="successMessage" class="feedback feedback--success">✓ {{ successMessage }}</p>
     <p v-if="actionError" class="feedback feedback--error">! {{ actionError }}</p>
+    <p class="refresh-note">{{ refreshNote }}</p>
 
     <div v-if="loading" class="state-card dashboard-state">
       <span class="spinner"></span><div><h3>Loading orders...</h3><p>Checking the kitchen queue.</p></div>
@@ -73,7 +74,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import OrderCard from '../components/OrderCard.vue'
 import api from '../services/api'
@@ -85,7 +86,11 @@ const error = ref('')
 const successMessage = ref('')
 const actionError = ref('')
 const updatingOrderId = ref(null)
+const streamConnected = ref(false)
 let messageTimer
+let pollTimer
+let orderStream
+const sseEnabled = import.meta.env.VITE_ENABLE_SSE === 'true'
 
 const todayLabel = new Intl.DateTimeFormat('en-MY', {
   weekday: 'long', day: 'numeric', month: 'long'
@@ -93,8 +98,8 @@ const todayLabel = new Intl.DateTimeFormat('en-MY', {
 const hour = new Date().getHours()
 const greeting = hour < 12 ? 'morning' : hour < 18 ? 'afternoon' : 'evening'
 
-async function fetchOrders() {
-  loading.value = true
+async function fetchOrders({ quiet = false } = {}) {
+  if (!quiet) loading.value = true
   error.value = ''
 
   try {
@@ -115,6 +120,72 @@ async function fetchOrders() {
 
 function ordersByStatus(status) {
   return orders.value.filter(order => order.status === status)
+}
+
+function startPolling() {
+  if (pollTimer) return
+  pollTimer = setInterval(() => {
+    fetchOrders({ quiet: true })
+  }, 5000)
+}
+
+function stopPolling() {
+  clearInterval(pollTimer)
+  pollTimer = null
+}
+
+function closeOrderStream() {
+  orderStream?.close()
+  orderStream = null
+  streamConnected.value = false
+}
+
+const refreshNote = computed(() => {
+  if (streamConnected.value) return 'Live updates connected. Polling is available as fallback.'
+  if (!sseEnabled) return 'SSE disabled. Polling every 5 seconds.'
+  return 'Auto-refreshing every 5 seconds'
+})
+
+function streamUrl() {
+  const token = localStorage.getItem('token')
+  if (!token) return null
+  const baseUrl = api.defaults.baseURL || 'http://localhost:8000/api'
+  return `${baseUrl}/vendor/orders/stream?token=${encodeURIComponent(token)}`
+}
+
+function startOrderStream() {
+  if (!sseEnabled || typeof EventSource === 'undefined') {
+    startPolling()
+    return
+  }
+  if (orderStream) {
+    return
+  }
+
+  const url = streamUrl()
+  if (!url) {
+    startPolling()
+    return
+  }
+
+  stopPolling()
+  orderStream = new EventSource(url)
+  orderStream.addEventListener('orders_update', (event) => {
+    try {
+      const payload = JSON.parse(event.data)
+      orders.value = payload.orders ?? []
+      error.value = ''
+      streamConnected.value = true
+      stopPolling()
+    } catch {
+      closeOrderStream()
+      startPolling()
+    }
+  })
+  orderStream.onerror = () => {
+    closeOrderStream()
+    startPolling()
+  }
 }
 
 const statusGroups = computed(() => [
@@ -165,7 +236,16 @@ const topItem = computed(() => {
   return Object.entries(itemCount).sort((a, b) => b[1] - a[1])[0]?.[0] || 'N/A'
 })
 
-onMounted(fetchOrders)
+onMounted(async () => {
+  await fetchOrders()
+  startOrderStream()
+})
+
+onBeforeUnmount(() => {
+  stopPolling()
+  clearTimeout(messageTimer)
+  closeOrderStream()
+})
 </script>
 
 <style scoped>
@@ -175,6 +255,13 @@ onMounted(fetchOrders)
 
 .dashboard-state {
   margin-top: 32px;
+}
+
+.refresh-note {
+  margin: 18px 0 0;
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 800;
 }
 
 .feedback {

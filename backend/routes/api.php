@@ -3,7 +3,9 @@
 use App\Database\Database;
 use App\Middleware\JwtMiddleware;
 use App\Middleware\RoleMiddleware;
+use App\Services\GeminiService;
 use Firebase\JWT\JWT;
+use Firebase\JWT\Key;
 use Psr\Http\Message\ResponseInterface;
 use Psr\Http\Message\ServerRequestInterface;
 use Slim\Psr7\Response;
@@ -47,6 +49,73 @@ $findOwnedVendor = static function (PDO $db, string $userId): ?array {
     $statement = $db->prepare('SELECT id, name FROM vendors WHERE owner_id = ?');
     $statement->execute([$userId]);
     return $statement->fetch() ?: null;
+};
+
+$fetchVendorOrders = static function (PDO $db, string $vendorId) use ($fetchOrder): array {
+    $statement = $db->prepare('SELECT id FROM orders WHERE vendor_id = ? ORDER BY created_at DESC');
+    $statement->execute([$vendorId]);
+    $orders = [];
+    foreach ($statement->fetchAll(PDO::FETCH_COLUMN) as $orderId) {
+        $order = $fetchOrder($db, $orderId);
+        unset($order['customer_id'], $order['vendor_id'], $order['vendor_name']);
+        $orders[] = $order;
+    }
+
+    return $orders;
+};
+
+$decodeStreamAuth = static function (ServerRequestInterface $request): ?array {
+    $query = $request->getQueryParams();
+    $token = trim((string) ($query['token'] ?? ''));
+    if ($token === '') {
+        $header = $request->getHeaderLine('Authorization');
+        if (preg_match('/^Bearer\s+(\S+)$/i', $header, $matches)) {
+            $token = $matches[1];
+        }
+    }
+    if ($token === '') {
+        return null;
+    }
+
+    try {
+        $key = hash('sha256', $_ENV['JWT_SECRET'], true);
+        return (array) JWT::decode($token, new Key($key, 'HS256'));
+    } catch (Throwable $e) {
+        return null;
+    }
+};
+
+$openSseStream = static function (ServerRequestInterface $request): void {
+    $allowedOrigins = [
+        'http://localhost:5173',
+        'http://localhost:5174',
+        'http://127.0.0.1:5173',
+        'http://127.0.0.1:5174',
+    ];
+    $origin = $request->getHeaderLine('Origin');
+    $allowOrigin = in_array($origin, $allowedOrigins, true) ? $origin : 'http://localhost:5173';
+
+    @set_time_limit(0);
+    ignore_user_abort(true);
+    if (function_exists('session_write_close')) {
+        session_write_close();
+    }
+    header('Content-Type: text/event-stream');
+    header('Cache-Control: no-cache');
+    header('Connection: keep-alive');
+    header('Content-Encoding: none');
+    header('X-Accel-Buffering: no');
+    header('Access-Control-Allow-Origin: ' . $allowOrigin);
+    header('Access-Control-Allow-Headers: Content-Type, Authorization');
+};
+
+$sendSseEvent = static function (string $event, array $payload): void {
+    echo 'event: ' . $event . "\n";
+    echo 'data: ' . json_encode($payload, JSON_UNESCAPED_SLASHES) . "\n\n";
+    if (ob_get_level() > 0) {
+        @ob_flush();
+    }
+    flush();
 };
 
 $createNotification = static function (PDO $db, string $userId, string $message): void {
@@ -103,13 +172,18 @@ $findRecommendations = static function (PDO $db, array $filters): array {
     if (($filters['vegetarian'] ?? null) === true) {
         $conditions[] = 'm.is_vegetarian = 1';
     }
+    $keywordTerms = [];
     if (($filters['keyword'] ?? null) !== null && trim((string) $filters['keyword']) !== '') {
-        $keyword = '%' . strtolower(trim((string) $filters['keyword'])) . '%';
-        $conditions[] = '(LOWER(m.name) LIKE ? OR LOWER(m.description) LIKE ?)';
-        $whereParams[] = $keyword;
-        $whereParams[] = $keyword;
-        $selectParams[] = $keyword;
-        $selectParams[] = $keyword;
+        $keywordTerms = preg_split('/\s+/', strtolower(trim((string) $filters['keyword']))) ?: [];
+        $keywordTerms = array_values(array_unique(array_filter($keywordTerms)));
+        foreach ($keywordTerms as $term) {
+            $keyword = '%' . $term . '%';
+            $conditions[] = '(LOWER(m.name) LIKE ? OR LOWER(m.description) LIKE ?)';
+            $whereParams[] = $keyword;
+            $whereParams[] = $keyword;
+            $selectParams[] = $keyword;
+            $selectParams[] = $keyword;
+        }
     }
 
     $preferenceScore = '0';
@@ -120,19 +194,19 @@ $findRecommendations = static function (PDO $db, array $filters): array {
     } elseif (($filters['vegetarian'] ?? null) === true) {
         $preferenceScore = 'm.is_vegetarian';
     }
-    $relevanceScore = (($filters['keyword'] ?? null) !== null && trim((string) $filters['keyword']) !== '')
-        ? '(CASE WHEN LOWER(m.name) LIKE ? THEN 2 WHEN LOWER(m.description) LIKE ? THEN 1 ELSE 0 END)'
+    $relevanceScore = $keywordTerms
+        ? implode(' + ', array_fill(0, count($keywordTerms), '(CASE WHEN LOWER(m.name) LIKE ? THEN 2 WHEN LOWER(m.description) LIKE ? THEN 1 ELSE 0 END)'))
         : '0';
 
     $sql = sprintf(
         "SELECT m.id, m.vendor_id, v.name AS vendor_name, m.name, m.description, m.price,
-                m.category, m.is_halal, m.is_vegetarian, m.in_stock,
+                m.category, NULL AS image_url, m.is_halal, m.is_vegetarian, m.in_stock,
                 (%s) AS preference_score,
                 %s AS relevance_score
          FROM menu_items m
          JOIN vendors v ON v.id = m.vendor_id
          WHERE %s
-         ORDER BY m.price ASC, preference_score DESC, relevance_score DESC, m.name ASC
+         ORDER BY relevance_score DESC, preference_score DESC, m.price ASC, m.name ASC
          LIMIT 20",
         $preferenceScore,
         $relevanceScore,
@@ -153,12 +227,13 @@ $findRecommendations = static function (PDO $db, array $filters): array {
 };
 
 $parseAiQuery = static function (string $query) use ($normalizeCategory): array {
+    // TODO: Replace simple parser with Gemini API interpretation after the rule-based flow is stable.
     $lower = strtolower($query);
     $parsed = [
         'budget' => null,
         'category' => null,
-        'halal' => str_contains($lower, 'halal') ? true : null,
-        'vegetarian' => preg_match('/\b(vegetarian|veggie|veg)\b/', $lower) ? true : null,
+        'halal' => str_contains($lower, 'halal'),
+        'vegetarian' => (bool) preg_match('/\b(vegetarian|veggie|veg)\b/', $lower),
         'keyword' => null,
     ];
 
@@ -176,7 +251,7 @@ $parseAiQuery = static function (string $query) use ($normalizeCategory): array 
     }
 
     $keywordWords = [];
-    foreach (['chicken', 'nasi', 'milo', 'tea', 'fried', 'spicy', 'rice', 'noodles', 'noodle'] as $word) {
+    foreach (['chicken', 'nasi', 'milo', 'tea', 'fried', 'spicy', 'coffee', 'burger', 'soup', 'rice', 'noodles', 'noodle'] as $word) {
         if (str_contains($lower, $word)) {
             $keywordWords[] = $word;
         }
@@ -361,10 +436,18 @@ $app->post('/api/ai/query', function (
         return jsonResponse($response, ['error' => 'query is required'], 400);
     }
 
-    $parsed = $parseAiQuery((string) $data['query']);
+    $query = trim((string) $data['query']);
+    $source = 'gemini';
+    try {
+        $parsed = (new GeminiService())->parseFoodPreferences($query);
+    } catch (Throwable $e) {
+        $source = 'rule_based_fallback';
+        $parsed = $parseAiQuery($query);
+    }
     $db = Database::connect();
 
     return jsonResponse($response, [
+        'source' => $source,
         'parsed' => $parsed,
         'recommendations' => $findRecommendations($db, $parsed),
     ]);
@@ -571,27 +654,104 @@ $app->get('/api/student/orders', function (
     return jsonResponse($response, ['orders' => $orders]);
 })->add(new RoleMiddleware(['student']))->add(new JwtMiddleware());
 
+$app->get('/api/student/orders/{id}/stream', function (
+    ServerRequestInterface $request,
+    ResponseInterface $response,
+    array $args
+) use ($fetchOrder, $decodeStreamAuth, $openSseStream, $sendSseEvent) {
+    $auth = $decodeStreamAuth($request);
+    if (!$auth || ($auth['role'] ?? null) !== 'student') {
+        return jsonResponse($response, ['error' => 'Valid student token is required'], 401);
+    }
+
+    $db = Database::connect();
+    $order = $fetchOrder($db, $args['id']);
+    if (!$order) {
+        return jsonResponse($response, ['error' => 'Order not found'], 404);
+    }
+    if ($order['customer_id'] !== $auth['sub']) {
+        return jsonResponse($response, ['error' => 'You cannot stream this order'], 403);
+    }
+
+    $openSseStream($request);
+    $lastHash = null;
+
+    while (!connection_aborted()) {
+        $order = $fetchOrder($db, $args['id']);
+        if (!$order || $order['customer_id'] !== $auth['sub']) {
+            $sendSseEvent('order_status_update', ['error' => 'Order no longer available']);
+            break;
+        }
+
+        unset($order['customer_id']);
+        $hash = md5(json_encode($order));
+        if ($hash !== $lastHash) {
+            $sendSseEvent('order_status_update', ['order' => $order]);
+            $lastHash = $hash;
+        } else {
+            echo ": keep-alive\n\n";
+            if (ob_get_level() > 0) {
+                @ob_flush();
+            }
+            flush();
+        }
+
+        if (($order['status'] ?? null) === 'collected') {
+            break;
+        }
+        sleep(5);
+    }
+    exit;
+});
+
 $app->get('/api/vendor/orders', function (
     ServerRequestInterface $request,
     ResponseInterface $response
-) use ($fetchOrder, $findOwnedVendor) {
+) use ($fetchVendorOrders, $findOwnedVendor) {
     $db = Database::connect();
     $vendor = $findOwnedVendor($db, getAuthUser($request)['sub']);
     if (!$vendor) {
         return jsonResponse($response, ['error' => 'Vendor account not found'], 404);
     }
 
-    $statement = $db->prepare('SELECT id FROM orders WHERE vendor_id = ? ORDER BY created_at DESC');
-    $statement->execute([$vendor['id']]);
-    $orders = [];
-    foreach ($statement->fetchAll(PDO::FETCH_COLUMN) as $orderId) {
-        $order = $fetchOrder($db, $orderId);
-        unset($order['customer_id'], $order['vendor_id'], $order['vendor_name']);
-        $orders[] = $order;
+    return jsonResponse($response, ['orders' => $fetchVendorOrders($db, $vendor['id'])]);
+})->add(new RoleMiddleware(['vendor']))->add(new JwtMiddleware());
+
+$app->get('/api/vendor/orders/stream', function (
+    ServerRequestInterface $request,
+    ResponseInterface $response
+) use ($fetchVendorOrders, $findOwnedVendor, $decodeStreamAuth, $openSseStream, $sendSseEvent) {
+    $auth = $decodeStreamAuth($request);
+    if (!$auth || ($auth['role'] ?? null) !== 'vendor') {
+        return jsonResponse($response, ['error' => 'Valid vendor token is required'], 401);
     }
 
-    return jsonResponse($response, ['orders' => $orders]);
-})->add(new RoleMiddleware(['vendor']))->add(new JwtMiddleware());
+    $db = Database::connect();
+    $vendor = $findOwnedVendor($db, $auth['sub']);
+    if (!$vendor) {
+        return jsonResponse($response, ['error' => 'Vendor account not found'], 404);
+    }
+
+    $openSseStream($request);
+    $lastHash = null;
+
+    while (!connection_aborted()) {
+        $orders = $fetchVendorOrders($db, $vendor['id']);
+        $hash = md5(json_encode($orders));
+        if ($hash !== $lastHash) {
+            $sendSseEvent('orders_update', ['orders' => $orders]);
+            $lastHash = $hash;
+        } else {
+            echo ": keep-alive\n\n";
+            if (ob_get_level() > 0) {
+                @ob_flush();
+            }
+            flush();
+        }
+        sleep(5);
+    }
+    exit;
+});
 
 $app->patch('/api/orders/{id}/status', function (
     ServerRequestInterface $request,
