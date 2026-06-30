@@ -16,6 +16,7 @@ import AdminOrders from '../views/AdminOrders.vue'
 import NotificationsPage from '../views/NotificationsPage.vue'
 import RecommendationsPage from '../views/RecommendationsPage.vue'
 import AIAssistantPage from '../views/AIAssistantPage.vue'
+import RewardsPage from '../views/RewardsPage.vue'
 
 const routes = [
   { path: '/', name: 'home', component: StudentHome, meta: { requiresAuth: true, roles: ['student'] } },
@@ -26,6 +27,7 @@ const routes = [
   { path: '/recommendations', name: 'recommendations', component: RecommendationsPage, meta: { requiresAuth: true, roles: ['student'] } },
   { path: '/ai-assistant', name: 'ai-assistant', component: AIAssistantPage, meta: { requiresAuth: true, roles: ['student'] } },
   { path: '/notifications', name: 'notifications', component: NotificationsPage, meta: { requiresAuth: true, roles: ['student'] } },
+  { path: '/rewards', name: 'rewards', component: RewardsPage, meta: { requiresAuth: true, roles: ['student'] } },
   { path: '/orders/history', name: 'order-history', component: OrderHistory, meta: { requiresAuth: true, roles: ['student'] } },
   { path: '/orders/:id/tracking', name: 'order-tracking', component: OrderTracking, meta: { requiresAuth: true, roles: ['student'] } },
   { path: '/orders/:id', name: 'order-status', component: OrderStatus, meta: { requiresAuth: true } },

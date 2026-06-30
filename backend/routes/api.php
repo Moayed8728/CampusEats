@@ -69,6 +69,27 @@ $createNotification = static function (PDO $db, string $userId, string $message)
     $statement->execute([uuid(), $userId, $message]);
 };
 
+$awardLoyaltyPoints = static function (PDO $db, array $order): int {
+    $points = max(0, (int) floor((float) $order['total']));
+    if ($points === 0) {
+        return 0;
+    }
+
+    $statement = $db->prepare(
+        'INSERT IGNORE INTO loyalty_transactions (id, student_id, order_id, points, description)
+         VALUES (?, ?, ?, ?, ?)'
+    );
+    $statement->execute([
+        uuid(),
+        $order['customer_id'],
+        $order['id'],
+        $points,
+        sprintf('Earned from order #%s', strtoupper(substr((string) $order['id'], 0, 8))),
+    ]);
+
+    return $statement->rowCount() > 0 ? $points : 0;
+};
+
 $parseBoolean = static function ($value): ?bool {
     if ($value === null || $value === '') {
         return null;
@@ -598,6 +619,42 @@ $app->get('/api/student/orders', function (
     return jsonResponse($response, ['orders' => $orders]);
 })->add(new RoleMiddleware(['student']))->add(new JwtMiddleware());
 
+$app->get('/api/rewards', function (
+    ServerRequestInterface $request,
+    ResponseInterface $response
+) {
+    $db = Database::connect();
+    $auth = getAuthUser($request);
+
+    $balance = $db->prepare(
+        'SELECT COALESCE(SUM(points), 0) FROM loyalty_transactions WHERE student_id = ?'
+    );
+    $balance->execute([$auth['sub']]);
+
+    $transactions = $db->prepare(
+        'SELECT lt.id, lt.order_id, lt.points, lt.description, lt.created_at,
+                o.total, v.name AS vendor_name
+         FROM loyalty_transactions lt
+         JOIN orders o ON o.id = lt.order_id
+         JOIN vendors v ON v.id = o.vendor_id
+         WHERE lt.student_id = ?
+         ORDER BY lt.created_at DESC'
+    );
+    $transactions->execute([$auth['sub']]);
+
+    $history = array_map(static function (array $transaction): array {
+        $transaction['points'] = (int) $transaction['points'];
+        $transaction['total'] = (float) $transaction['total'];
+        return $transaction;
+    }, $transactions->fetchAll());
+
+    return jsonResponse($response, [
+        'balance' => (int) $balance->fetchColumn(),
+        'rate' => 'RM1 = 1 point',
+        'transactions' => $history,
+    ]);
+})->add(new RoleMiddleware(['student']))->add(new JwtMiddleware());
+
 $app->get('/api/vendor/orders', function (
     ServerRequestInterface $request,
     ResponseInterface $response
@@ -615,7 +672,7 @@ $app->patch('/api/orders/{id}/status', function (
     ServerRequestInterface $request,
     ResponseInterface $response,
     array $args
-) use ($fetchOrder, $findOwnedVendor, $createNotification) {
+) use ($fetchOrder, $findOwnedVendor, $createNotification, $awardLoyaltyPoints) {
     $data = (array) $request->getParsedBody();
     if (validateRequiredFields($data, ['status'])) {
         return jsonResponse($response, ['error' => 'status is required'], 400);
@@ -639,7 +696,7 @@ $app->patch('/api/orders/{id}/status', function (
 
     try {
         $db->beginTransaction();
-        $statement = $db->prepare('SELECT status, vendor_id, customer_id FROM orders WHERE id = ? FOR UPDATE');
+        $statement = $db->prepare('SELECT id, status, vendor_id, customer_id, total FROM orders WHERE id = ? FOR UPDATE');
         $statement->execute([$args['id']]);
         $order = $statement->fetch();
 
@@ -664,6 +721,11 @@ $app->patch('/api/orders/{id}/status', function (
             $createNotification($db, $order['customer_id'], 'Your order is ready for pickup.');
         } elseif ($nextStatus === 'preparing') {
             $createNotification($db, $order['customer_id'], 'Your order is being prepared.');
+        } elseif ($nextStatus === 'collected') {
+            $points = $awardLoyaltyPoints($db, $order);
+            if ($points > 0) {
+                $createNotification($db, $order['customer_id'], "You earned {$points} loyalty points.");
+            }
         }
         $db->commit();
     } catch (Throwable $e) {

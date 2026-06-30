@@ -10,6 +10,7 @@
           <RouterLink to="/recommendations">Recommendations</RouterLink>
           <RouterLink to="/ai-assistant">AI Assistant</RouterLink>
           <RouterLink to="/notifications">Notifications</RouterLink>
+          <RouterLink to="/rewards">Rewards</RouterLink>
           <RouterLink to="/orders/history">Order History</RouterLink>
         </template>
         <template v-if="auth.role==='vendor'"><RouterLink to="/vendor/dashboard">Dashboard</RouterLink><RouterLink to="/vendor/analytics">Analytics</RouterLink></template>

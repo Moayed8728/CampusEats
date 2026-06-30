@@ -67,6 +67,14 @@ To test polling in the browser:
 4. Login as `student@test.com` and open an order status page.
 5. Update that order from the vendor dashboard and confirm the student page updates on the next poll.
 
+## Loyalty Points
+
+Students earn loyalty points when an order is marked `collected` by the vendor.
+
+- RM1 = 1 point
+- Points are awarded once per order
+- Students can view their balance and point history at `/rewards`
+
 ## Database Import
 
 From the project root:

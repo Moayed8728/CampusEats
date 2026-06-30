@@ -162,3 +162,15 @@ CREATE TABLE IF NOT EXISTS notifications (
     CONSTRAINT fk_notifications_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
     INDEX idx_notifications_user (user_id, created_at)
 );
+
+CREATE TABLE IF NOT EXISTS loyalty_transactions (
+    id CHAR(36) PRIMARY KEY,
+    student_id CHAR(36) NOT NULL,
+    order_id CHAR(36) NOT NULL UNIQUE,
+    points INT NOT NULL,
+    description VARCHAR(255) NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT fk_loyalty_student FOREIGN KEY (student_id) REFERENCES users(id) ON DELETE CASCADE,
+    CONSTRAINT fk_loyalty_order FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE CASCADE,
+    INDEX idx_loyalty_student (student_id, created_at)
+);
