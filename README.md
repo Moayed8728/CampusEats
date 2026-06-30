@@ -35,6 +35,8 @@ DB_PORT=3306
 JWT_SECRET=campuseats_secret_key
 GEMINI_API_KEY=your_gemini_api_key
 GEMINI_MODEL=gemini-3-flash-preview
+STRIPE_SECRET_KEY=your_stripe_secret_key
+STRIPE_CURRENCY=myr
 ```
 
 ## Gemini Setup
@@ -49,6 +51,56 @@ GEMINI_MODEL=gemini-3-flash-preview
 ```
 
 If `GEMINI_MODEL` is omitted, the backend defaults to `gemini-1.5-flash`. If Gemini is unavailable, missing, or returns invalid JSON, CampusEats automatically falls back to the existing rule-based parser and still returns recommendations.
+
+## Stripe Sandbox Payments
+
+CampusEats uses Stripe Sandbox payments before an order is created. The student sees a card form and a single `Pay` button. Orders are created only after Stripe confirms the card payment and the backend verifies the PaymentIntent.
+
+Backend variables in `backend/.env`:
+
+```env
+STRIPE_SECRET_KEY=your_stripe_secret_key
+STRIPE_CURRENCY=myr
+```
+
+Frontend variables in `frontend/.env` or your Vercel environment:
+
+```env
+VITE_STRIPE_PUBLIC_KEY=your_stripe_publishable_key
+```
+
+Do not commit `.env` files. The Stripe secret key is used only by the backend. The frontend only receives the publishable key and a PaymentIntent client secret.
+
+Test card:
+
+```text
+4242 4242 4242 4242
+Any future expiry
+Any CVC
+Any ZIP/postal code
+```
+
+Decline test card:
+
+```text
+4000 0000 0000 0002
+Any future expiry
+Any CVC
+```
+
+Payment flow:
+
+1. Student adds items to cart.
+2. Student chooses a pickup time.
+3. Student enters a Stripe test card and clicks `Pay`.
+4. Stripe confirms the payment in the browser.
+5. The backend verifies the PaymentIntent status, amount, and currency.
+6. The frontend creates the order with `payment_method=stripe` and `payment_status=paid`.
+7. The order status page shows payment method, status, and reference.
+
+For failed Stripe payments, CampusEats shows the Stripe error and does not create the order.
+
+If `VITE_STRIPE_PUBLIC_KEY` is missing, the card form is hidden. If `STRIPE_SECRET_KEY` is missing or Stripe fails, the backend returns an error for Stripe intent creation.
 
 ## Real-Time Updates
 

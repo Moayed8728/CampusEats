@@ -7,10 +7,12 @@ use App\Services\GeminiService;
 use Firebase\JWT\JWT;
 use Psr\Http\Message\ResponseInterface;
 use Psr\Http\Message\ServerRequestInterface;
+use Stripe\StripeClient;
 
 $fetchOrder = static function (PDO $db, string $orderId): ?array {
     $statement = $db->prepare(
         'SELECT o.id, o.customer_id, o.vendor_id, o.status, o.pickup_at, o.total,
+                o.payment_status, o.payment_reference, o.payment_method,
                 v.name AS vendor_name, u.name AS customer_name
          FROM orders o
          JOIN vendors v ON v.id = o.vendor_id
@@ -245,6 +247,63 @@ $parseAiQuery = static function (string $query) use ($normalizeCategory): array 
     $parsed['keyword'] = $keywordWords ? implode(' ', array_unique($keywordWords)) : trim($query);
 
     return $parsed;
+};
+
+$normalizePaymentData = static function (array $data): array {
+    $paymentStatus = strtolower(trim((string) ($data['payment_status'] ?? 'mock_paid')));
+    $paymentMethod = strtolower(trim((string) ($data['payment_method'] ?? 'mock')));
+    $paymentReference = trim((string) ($data['payment_reference'] ?? ''));
+
+    if (!in_array($paymentStatus, ['paid', 'mock_paid'], true)) {
+        throw new InvalidArgumentException('Payment must be completed before placing the order.');
+    }
+    if (!in_array($paymentMethod, ['stripe', 'mock'], true)) {
+        throw new InvalidArgumentException('Unsupported payment method.');
+    }
+    if ($paymentStatus === 'paid' && $paymentMethod !== 'stripe') {
+        throw new InvalidArgumentException('Stripe payments must use payment_method stripe.');
+    }
+    if ($paymentMethod === 'stripe' && ($paymentStatus !== 'paid' || !str_starts_with($paymentReference, 'pi_'))) {
+        throw new InvalidArgumentException('Stripe payments require payment_status paid and a pi_ payment reference.');
+    }
+    if ($paymentStatus === 'mock_paid' && $paymentMethod !== 'mock') {
+        throw new InvalidArgumentException('Mock payments must use payment_method mock.');
+    }
+    if ($paymentReference === '') {
+        $paymentReference = $paymentMethod === 'mock' ? 'mock_' . bin2hex(random_bytes(8)) : null;
+    }
+
+    return [
+        'payment_status' => $paymentStatus,
+        'payment_method' => $paymentMethod,
+        'payment_reference' => $paymentReference,
+    ];
+};
+
+$verifyStripePayment = static function (array $payment, float $total): void {
+    if ($payment['payment_method'] !== 'stripe') {
+        return;
+    }
+
+    $secretKey = trim((string) ($_ENV['STRIPE_SECRET_KEY'] ?? ''));
+    if ($secretKey === '') {
+        throw new RuntimeException('Stripe is not configured.');
+    }
+
+    $stripe = new StripeClient($secretKey);
+    $intent = $stripe->paymentIntents->retrieve($payment['payment_reference']);
+    $expectedAmount = (int) round($total * 100);
+    $expectedCurrency = strtolower(trim((string) ($_ENV['STRIPE_CURRENCY'] ?? 'myr'))) ?: 'myr';
+
+    if ($intent->status !== 'succeeded') {
+        throw new RuntimeException('Stripe payment has not succeeded.');
+    }
+    if ((int) $intent->amount !== $expectedAmount) {
+        throw new RuntimeException('Stripe payment amount does not match the order total.');
+    }
+    if (strtolower((string) $intent->currency) !== $expectedCurrency) {
+        throw new RuntimeException('Stripe payment currency does not match.');
+    }
 };
 
 $app->get('/api/health', function (ServerRequestInterface $request, ResponseInterface $response) {
@@ -505,7 +564,56 @@ $app->post('/api/reviews', function (ServerRequestInterface $request, ResponseIn
     return jsonResponse($response, ['message' => 'Review submitted'], 201);
 })->add(new RoleMiddleware(['student']))->add(new JwtMiddleware());
 
-$app->post('/api/orders', function (ServerRequestInterface $request, ResponseInterface $response) {
+$app->post('/api/payments/create-intent', function (
+    ServerRequestInterface $request,
+    ResponseInterface $response
+) {
+    $secretKey = trim((string) ($_ENV['STRIPE_SECRET_KEY'] ?? ''));
+    if ($secretKey === '') {
+        return jsonResponse($response, ['error' => 'Stripe is not configured. Please use Mock Pay.'], 503);
+    }
+
+    $data = (array) $request->getParsedBody();
+    $amount = filter_var($data['amount'] ?? null, FILTER_VALIDATE_INT, [
+        'options' => ['min_range' => 1],
+    ]);
+    if ($amount === false) {
+        return jsonResponse($response, ['error' => 'amount must be a positive integer in sen'], 400);
+    }
+
+    try {
+        $stripe = new StripeClient($secretKey);
+        $intent = $stripe->paymentIntents->create([
+            'amount' => $amount,
+            'currency' => strtolower(trim((string) ($_ENV['STRIPE_CURRENCY'] ?? 'myr'))) ?: 'myr',
+            'payment_method_types' => ['card'],
+            'metadata' => [
+                'student_id' => getAuthUser($request)['sub'],
+                'app' => 'CampusEats',
+            ],
+        ]);
+    } catch (Throwable $e) {
+        return jsonResponse($response, ['error' => 'Unable to create Stripe payment. Please use Mock Pay.'], 502);
+    }
+
+    return jsonResponse($response, [
+        'client_secret' => $intent->client_secret,
+        'payment_intent_id' => $intent->id,
+    ]);
+})->add(new RoleMiddleware(['student']))->add(new JwtMiddleware());
+
+$app->post('/api/payments/mock-success', function (
+    ServerRequestInterface $request,
+    ResponseInterface $response
+) {
+    return jsonResponse($response, [
+        'payment_status' => 'mock_paid',
+        'payment_reference' => 'mock_' . bin2hex(random_bytes(8)),
+        'payment_method' => 'mock',
+    ]);
+})->add(new RoleMiddleware(['student']))->add(new JwtMiddleware());
+
+$app->post('/api/orders', function (ServerRequestInterface $request, ResponseInterface $response) use ($normalizePaymentData, $verifyStripePayment) {
     $data = (array) $request->getParsedBody();
     $missing = validateRequiredFields($data, ['vendor_id', 'pickup_at', 'items']);
 
@@ -520,6 +628,11 @@ $app->post('/api/orders', function (ServerRequestInterface $request, ResponseInt
         $pickupAt = (new DateTimeImmutable((string) $data['pickup_at']))->format('Y-m-d H:i:s');
     } catch (Throwable $e) {
         return jsonResponse($response, ['error' => 'pickup_at must be a valid date and time'], 400);
+    }
+    try {
+        $payment = $normalizePaymentData($data);
+    } catch (InvalidArgumentException $e) {
+        return jsonResponse($response, ['error' => $e->getMessage()], 400);
     }
 
     $requested = [];
@@ -562,16 +675,33 @@ $app->post('/api/orders', function (ServerRequestInterface $request, ResponseInt
         $validatedItems[] = ['id' => $menuId, 'qty' => $qty, 'price' => $price];
     }
 
+    try {
+        $verifyStripePayment($payment, $total);
+    } catch (Throwable $e) {
+        return jsonResponse($response, ['error' => $e->getMessage()], 400);
+    }
+
     $orderId = uuid();
     $auth = getAuthUser($request);
 
     try {
         $db->beginTransaction();
         $order = $db->prepare(
-            'INSERT INTO orders (id, customer_id, vendor_id, pickup_at, total, status)
-             VALUES (?, ?, ?, ?, ?, ?)'
+            'INSERT INTO orders
+                (id, customer_id, vendor_id, pickup_at, total, payment_status, payment_reference, payment_method, status)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
         );
-        $order->execute([$orderId, $auth['sub'], $data['vendor_id'], $pickupAt, $total, 'placed']);
+        $order->execute([
+            $orderId,
+            $auth['sub'],
+            $data['vendor_id'],
+            $pickupAt,
+            $total,
+            $payment['payment_status'],
+            $payment['payment_reference'],
+            $payment['payment_method'],
+            'placed',
+        ]);
 
         $orderItem = $db->prepare(
             'INSERT INTO order_items (id, order_id, menu_item_id, qty, unit_price)
@@ -591,6 +721,9 @@ $app->post('/api/orders', function (ServerRequestInterface $request, ResponseInt
     return jsonResponse($response, [
         'order_id' => $orderId,
         'status' => 'placed',
+        'payment_status' => $payment['payment_status'],
+        'payment_reference' => $payment['payment_reference'],
+        'payment_method' => $payment['payment_method'],
         'total' => round($total, 2),
     ], 201);
 })->add(new RoleMiddleware(['student']))->add(new JwtMiddleware());
