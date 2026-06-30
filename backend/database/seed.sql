@@ -59,6 +59,6 @@ ON DUPLICATE KEY UPDATE
     message = VALUES(message), is_read = VALUES(is_read), created_at = VALUES(created_at);
 
 INSERT INTO loyalty_transactions (id, student_id, order_id, points, description, created_at) VALUES
-('80000000-0000-4000-8000-000000000001', '10000000-0000-4000-8000-000000000001', '40000000-0000-4000-8000-000000000004', 1500, 'Earned from order #40000000', TIMESTAMP(CURDATE(), '11:50:00'))
+('80000000-0000-4000-8000-000000000001', '10000000-0000-4000-8000-000000000001', '40000000-0000-4000-8000-000000000004', 15, 'Earned from order #40000000', TIMESTAMP(CURDATE(), '11:50:00'))
 ON DUPLICATE KEY UPDATE
     points = VALUES(points), description = VALUES(description), created_at = VALUES(created_at);

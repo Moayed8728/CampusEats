@@ -4,11 +4,11 @@
       <div>
         <span class="eyebrow">CampusEats rewards</span>
         <h1>{{ balance }} points</h1>
-        <p>Earn 100 points for every RM1 when an order is collected.</p>
+        <p>Earn 1 point for every RM1 when an order is collected.</p>
       </div>
       <div class="rate-card">
         <span>Rate</span>
-        <strong>RM1 = 100 points</strong>
+        <strong>RM1 = 1 point</strong>
       </div>
     </div>
 
@@ -23,17 +23,17 @@
 
     <div class="reward-grid">
       <article class="reward-card">
-        <span>2500</span>
+        <span>25</span>
         <h3>Snack boost</h3>
         <p>Save points for small treats between classes.</p>
       </article>
       <article class="reward-card">
-        <span>5000</span>
+        <span>50</span>
         <h3>Lunch goal</h3>
         <p>Keep collecting toward your next campus lunch.</p>
       </article>
       <article class="reward-card">
-        <span>10000</span>
+        <span>100</span>
         <h3>Big saver</h3>
         <p>A steady order habit turns into serious rewards.</p>
       </article>
@@ -75,8 +75,8 @@ import api from '../services/api'
 
 const balance = ref(0)
 const collectedOrders = ref(0)
-const nextMilestone = ref(2500)
-const pointsToNextMilestone = ref(2500)
+const nextMilestone = ref(25)
+const pointsToNextMilestone = ref(25)
 const transactions = ref([])
 const loading = ref(true)
 const error = ref('')
@@ -99,7 +99,7 @@ async function fetchRewards() {
     const { data } = await api.get('/rewards')
     balance.value = data.balance ?? 0
     collectedOrders.value = data.collected_orders ?? 0
-    nextMilestone.value = data.next_milestone ?? 2500
+    nextMilestone.value = data.next_milestone ?? 25
     pointsToNextMilestone.value = data.points_to_next_milestone ?? nextMilestone.value
     transactions.value = data.transactions ?? []
   } catch (requestError) {
