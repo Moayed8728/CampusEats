@@ -143,7 +143,7 @@ function closeOrderStream() {
 const refreshNote = computed(() => {
   if (streamConnected.value) return 'Live updates connected. Polling is available as fallback.'
   if (!sseEnabled) return 'SSE disabled. Polling every 5 seconds.'
-  return 'Auto-refreshing every 5 seconds'
+  return 'Connecting live updates. Polling is used only if the stream fails.'
 })
 
 function streamUrl() {

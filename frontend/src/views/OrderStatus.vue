@@ -46,7 +46,7 @@ const sseEnabled = import.meta.env.VITE_ENABLE_SSE === 'true'
 const trackingNote = computed(() => {
   if (streamConnected.value) return 'Tracking updates automatically with live updates.'
   if (!sseEnabled) return 'SSE disabled. Tracking updates every 5 seconds.'
-  return 'Tracking updates automatically every 5 seconds.'
+  return 'Connecting live tracking. Polling is used only if the stream fails.'
 })
 
 async function fetchOrder({ quiet = false } = {}) {
