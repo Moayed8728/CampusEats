@@ -74,6 +74,8 @@ Students earn loyalty points when an order is marked `collected` by the vendor.
 - RM1 = 1 point
 - Points are awarded once per order
 - Students can view their balance and point history at `/rewards`
+- Existing collected orders are backfilled when rewards are viewed
+- Admins can review all student balances and recent reward activity at `/admin/rewards`
 
 ## Database Import
 

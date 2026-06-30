@@ -14,7 +14,7 @@
           <RouterLink to="/orders/history">Order History</RouterLink>
         </template>
         <template v-if="auth.role==='vendor'"><RouterLink to="/vendor/dashboard">Dashboard</RouterLink><RouterLink to="/vendor/analytics">Analytics</RouterLink></template>
-        <template v-if="auth.role==='admin'"><RouterLink to="/admin">Dashboard</RouterLink><RouterLink to="/admin/users">Users</RouterLink><RouterLink to="/admin/vendors">Vendors</RouterLink><RouterLink to="/admin/orders">Orders</RouterLink></template>
+        <template v-if="auth.role==='admin'"><RouterLink to="/admin">Dashboard</RouterLink><RouterLink to="/admin/users">Users</RouterLink><RouterLink to="/admin/vendors">Vendors</RouterLink><RouterLink to="/admin/rewards">Rewards</RouterLink><RouterLink to="/admin/orders">Orders</RouterLink></template>
       </nav>
       <div class="account-actions">
         <template v-if="auth.isAuthenticated"><span class="user-chip"><i>{{ userInitial }}</i><span><small>{{ auth.role }}</small>{{ auth.user?.name }}</span></span><button class="logout-button" @click="logout">Logout</button></template>

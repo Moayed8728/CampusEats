@@ -13,6 +13,7 @@ import AdminPage from '../views/AdminPage.vue'
 import AdminUsers from '../views/AdminUsers.vue'
 import AdminVendors from '../views/AdminVendors.vue'
 import AdminOrders from '../views/AdminOrders.vue'
+import AdminRewards from '../views/AdminRewards.vue'
 import NotificationsPage from '../views/NotificationsPage.vue'
 import RecommendationsPage from '../views/RecommendationsPage.vue'
 import AIAssistantPage from '../views/AIAssistantPage.vue'
@@ -36,6 +37,7 @@ const routes = [
   { path: '/admin', name: 'admin', component: AdminPage, meta: { requiresAuth: true, roles: ['admin'] } },
   { path: '/admin/users', name: 'admin-users', component: AdminUsers, meta: { requiresAuth: true, roles: ['admin'] } },
   { path: '/admin/vendors', name: 'admin-vendors', component: AdminVendors, meta: { requiresAuth: true, roles: ['admin'] } },
+  { path: '/admin/rewards', name: 'admin-rewards', component: AdminRewards, meta: { requiresAuth: true, roles: ['admin'] } },
   { path: '/admin/orders', name: 'admin-orders', component: AdminOrders, meta: { requiresAuth: true, roles: ['admin'] } }
 ]
 

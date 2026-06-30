@@ -90,6 +90,27 @@ $awardLoyaltyPoints = static function (PDO $db, array $order): int {
     return $statement->rowCount() > 0 ? $points : 0;
 };
 
+$syncLoyaltyPoints = static function (PDO $db, ?string $studentId = null): int {
+    $sql = "INSERT IGNORE INTO loyalty_transactions (id, student_id, order_id, points, description, created_at)
+            SELECT UUID(), o.customer_id, o.id, FLOOR(o.total),
+                   CONCAT('Earned from order #', UPPER(LEFT(o.id, 8))),
+                   COALESCE(o.updated_at, o.created_at)
+            FROM orders o
+            JOIN users u ON u.id = o.customer_id AND u.role = 'student'
+            WHERE o.status = 'collected' AND o.total >= 1";
+    $params = [];
+
+    if ($studentId !== null) {
+        $sql .= ' AND o.customer_id = ?';
+        $params[] = $studentId;
+    }
+
+    $statement = $db->prepare($sql);
+    $statement->execute($params);
+
+    return $statement->rowCount();
+};
+
 $parseBoolean = static function ($value): ?bool {
     if ($value === null || $value === '') {
         return null;
@@ -622,9 +643,10 @@ $app->get('/api/student/orders', function (
 $app->get('/api/rewards', function (
     ServerRequestInterface $request,
     ResponseInterface $response
-) {
+) use ($syncLoyaltyPoints) {
     $db = Database::connect();
     $auth = getAuthUser($request);
+    $syncLoyaltyPoints($db, $auth['sub']);
 
     $balance = $db->prepare(
         'SELECT COALESCE(SUM(points), 0) FROM loyalty_transactions WHERE student_id = ?'
@@ -642,15 +664,35 @@ $app->get('/api/rewards', function (
     );
     $transactions->execute([$auth['sub']]);
 
+    $collectedOrders = $db->prepare(
+        "SELECT COUNT(*) FROM orders WHERE customer_id = ? AND status = 'collected'"
+    );
+    $collectedOrders->execute([$auth['sub']]);
+
     $history = array_map(static function (array $transaction): array {
         $transaction['points'] = (int) $transaction['points'];
         $transaction['total'] = (float) $transaction['total'];
         return $transaction;
     }, $transactions->fetchAll());
+    $pointsBalance = (int) $balance->fetchColumn();
+    $milestones = [25, 50, 100, 200];
+    $nextMilestone = null;
+    foreach ($milestones as $milestone) {
+        if ($pointsBalance < $milestone) {
+            $nextMilestone = $milestone;
+            break;
+        }
+    }
+    if ($nextMilestone === null) {
+        $nextMilestone = $pointsBalance + 50;
+    }
 
     return jsonResponse($response, [
-        'balance' => (int) $balance->fetchColumn(),
+        'balance' => $pointsBalance,
         'rate' => 'RM1 = 1 point',
+        'collected_orders' => (int) $collectedOrders->fetchColumn(),
+        'next_milestone' => $nextMilestone,
+        'points_to_next_milestone' => max(0, $nextMilestone - $pointsBalance),
         'transactions' => $history,
     ]);
 })->add(new RoleMiddleware(['student']))->add(new JwtMiddleware());
@@ -845,9 +887,61 @@ $app->get('/api/admin/summary', function (ServerRequestInterface $request, Respo
         'total_vendors' => (int) $db->query('SELECT COUNT(*) FROM vendors')->fetchColumn(),
         'total_orders' => (int) $db->query('SELECT COUNT(*) FROM orders')->fetchColumn(),
         'total_revenue' => (float) $db->query('SELECT COALESCE(SUM(total), 0) FROM orders')->fetchColumn(),
+        'total_loyalty_points' => (int) $db->query('SELECT COALESCE(SUM(points), 0) FROM loyalty_transactions')->fetchColumn(),
     ];
 
     return jsonResponse($response, ['summary' => $summary]);
+})->add(new RoleMiddleware(['admin']))->add(new JwtMiddleware());
+
+$app->get('/api/admin/rewards', function (
+    ServerRequestInterface $request,
+    ResponseInterface $response
+) use ($syncLoyaltyPoints) {
+    $db = Database::connect();
+    $syncLoyaltyPoints($db);
+
+    $summary = [
+        'total_points' => (int) $db->query('SELECT COALESCE(SUM(points), 0) FROM loyalty_transactions')->fetchColumn(),
+        'rewarded_orders' => (int) $db->query('SELECT COUNT(*) FROM loyalty_transactions')->fetchColumn(),
+        'students_with_points' => (int) $db->query('SELECT COUNT(DISTINCT student_id) FROM loyalty_transactions')->fetchColumn(),
+    ];
+
+    $balances = $db->query(
+        "SELECT u.id, u.name, u.email,
+                COALESCE(SUM(lt.points), 0) AS points,
+                COUNT(lt.id) AS rewarded_orders
+         FROM users u
+         LEFT JOIN loyalty_transactions lt ON lt.student_id = u.id
+         WHERE u.role = 'student'
+         GROUP BY u.id, u.name, u.email
+         ORDER BY points DESC, u.name"
+    )->fetchAll();
+    $balances = array_map(static function (array $balance): array {
+        $balance['points'] = (int) $balance['points'];
+        $balance['rewarded_orders'] = (int) $balance['rewarded_orders'];
+        return $balance;
+    }, $balances);
+
+    $recent = $db->query(
+        'SELECT lt.id, lt.order_id, lt.points, lt.description, lt.created_at,
+                u.name AS student_name, u.email AS student_email, v.name AS vendor_name
+         FROM loyalty_transactions lt
+         JOIN users u ON u.id = lt.student_id
+         JOIN orders o ON o.id = lt.order_id
+         JOIN vendors v ON v.id = o.vendor_id
+         ORDER BY lt.created_at DESC
+         LIMIT 20'
+    )->fetchAll();
+    $recent = array_map(static function (array $transaction): array {
+        $transaction['points'] = (int) $transaction['points'];
+        return $transaction;
+    }, $recent);
+
+    return jsonResponse($response, [
+        'summary' => $summary,
+        'balances' => $balances,
+        'recent_transactions' => $recent,
+    ]);
 })->add(new RoleMiddleware(['admin']))->add(new JwtMiddleware());
 
 $app->get('/api/admin/users', function (ServerRequestInterface $request, ResponseInterface $response) {
