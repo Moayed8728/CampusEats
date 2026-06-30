@@ -1,6 +1,3 @@
-    CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-
-
 CREATE TABLE IF NOT EXISTS users (
     id CHAR(36) PRIMARY KEY,
     name VARCHAR(120) NOT NULL,
@@ -20,6 +17,20 @@ CREATE TABLE IF NOT EXISTS vendors (
     is_active TINYINT(1) NOT NULL DEFAULT 1,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT fk_vendors_owner FOREIGN KEY (owner_id) REFERENCES users(id)
+);
+
+CREATE TABLE IF NOT EXISTS vendor_applications (
+    id CHAR(36) PRIMARY KEY,
+    user_id CHAR(36) NOT NULL,
+    vendor_name VARCHAR(160) NOT NULL,
+    description TEXT NULL,
+    location VARCHAR(160) NULL,
+    opening_hours VARCHAR(120) NULL,
+    status ENUM('pending','approved','rejected') NOT NULL DEFAULT 'pending',
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT fk_vendor_applications_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    INDEX idx_vendor_applications_user (user_id),
+    INDEX idx_vendor_applications_status (status, created_at)
 );
 
 SET @add_location = (
@@ -118,6 +129,9 @@ CREATE TABLE IF NOT EXISTS orders (
     vendor_id CHAR(36) NOT NULL,
     pickup_at DATETIME NOT NULL,
     total DECIMAL(10,2) NOT NULL,
+    payment_status ENUM('pending','paid','failed','mock_paid') NOT NULL DEFAULT 'pending',
+    payment_reference VARCHAR(255) NULL,
+    payment_method ENUM('mock','stripe') NOT NULL DEFAULT 'mock',
     status ENUM('placed', 'preparing', 'ready', 'collected') NOT NULL DEFAULT 'placed',
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -127,6 +141,51 @@ CREATE TABLE IF NOT EXISTS orders (
     INDEX idx_orders_customer (customer_id),
     INDEX idx_orders_created (created_at)
 );
+
+SET @add_order_payment_status = (
+    SELECT IF(
+        COUNT(*) = 0,
+        'ALTER TABLE orders ADD COLUMN payment_status ENUM(''pending'',''paid'',''failed'',''mock_paid'') NOT NULL DEFAULT ''pending'' AFTER total',
+        'SELECT 1'
+    )
+    FROM information_schema.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME = 'orders'
+      AND COLUMN_NAME = 'payment_status'
+);
+PREPARE add_order_payment_status_stmt FROM @add_order_payment_status;
+EXECUTE add_order_payment_status_stmt;
+DEALLOCATE PREPARE add_order_payment_status_stmt;
+
+SET @add_order_payment_reference = (
+    SELECT IF(
+        COUNT(*) = 0,
+        'ALTER TABLE orders ADD COLUMN payment_reference VARCHAR(255) NULL AFTER payment_status',
+        'SELECT 1'
+    )
+    FROM information_schema.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME = 'orders'
+      AND COLUMN_NAME = 'payment_reference'
+);
+PREPARE add_order_payment_reference_stmt FROM @add_order_payment_reference;
+EXECUTE add_order_payment_reference_stmt;
+DEALLOCATE PREPARE add_order_payment_reference_stmt;
+
+SET @add_order_payment_method = (
+    SELECT IF(
+        COUNT(*) = 0,
+        'ALTER TABLE orders ADD COLUMN payment_method ENUM(''mock'',''stripe'') NOT NULL DEFAULT ''mock'' AFTER payment_reference',
+        'SELECT 1'
+    )
+    FROM information_schema.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME = 'orders'
+      AND COLUMN_NAME = 'payment_method'
+);
+PREPARE add_order_payment_method_stmt FROM @add_order_payment_method;
+EXECUTE add_order_payment_method_stmt;
+DEALLOCATE PREPARE add_order_payment_method_stmt;
 
 CREATE TABLE IF NOT EXISTS order_items (
     id CHAR(36) PRIMARY KEY,
