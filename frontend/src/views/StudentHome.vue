@@ -66,7 +66,7 @@ async function fetchVendors() {
   error.value = ''
 
   try {
-    const { data } = await api.get('/vendors')
+    const { data } = await api.get('/vendors', { skipAuth: true })
     vendors.value = data.vendors ?? []
   } catch (requestError) {
     error.value = requestError.response?.data?.error || 'Please make sure the CampusEats API is running.'

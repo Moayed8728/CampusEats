@@ -47,7 +47,7 @@ async function fetchMenu() {
   loading.value = true
   error.value = ''
   try {
-    const { data } = await api.get(`/vendors/${route.params.id}/menu`)
+    const { data } = await api.get(`/vendors/${route.params.id}/menu`, { skipAuth: true })
     vendor.value = data.vendor ?? {}
     menuItems.value = data.menu_items ?? data.menu ?? []
   } catch (requestError) {
