@@ -5,10 +5,8 @@ use App\Middleware\JwtMiddleware;
 use App\Middleware\RoleMiddleware;
 use App\Services\GeminiService;
 use Firebase\JWT\JWT;
-use Firebase\JWT\Key;
 use Psr\Http\Message\ResponseInterface;
 use Psr\Http\Message\ServerRequestInterface;
-use Slim\Psr7\Response;
 
 $fetchOrder = static function (PDO $db, string $orderId): ?array {
     $statement = $db->prepare(
@@ -62,67 +60,6 @@ $fetchVendorOrders = static function (PDO $db, string $vendorId) use ($fetchOrde
     }
 
     return $orders;
-};
-
-$decodeStreamAuth = static function (ServerRequestInterface $request): ?array {
-    $query = $request->getQueryParams();
-    $token = trim((string) ($query['token'] ?? ''));
-    if ($token === '') {
-        $header = $request->getHeaderLine('Authorization');
-        if (preg_match('/^Bearer\s+(\S+)$/i', $header, $matches)) {
-            $token = $matches[1];
-        }
-    }
-    if ($token === '') {
-        return null;
-    }
-
-    try {
-        $key = hash('sha256', $_ENV['JWT_SECRET'], true);
-        return (array) JWT::decode($token, new Key($key, 'HS256'));
-    } catch (Throwable $e) {
-        return null;
-    }
-};
-
-$openSseStream = static function (ServerRequestInterface $request): void {
-    $configuredOrigins = array_filter(array_map(
-        'trim',
-        explode(',', (string) ($_ENV['CORS_ALLOWED_ORIGINS'] ?? $_ENV['FRONTEND_URL'] ?? ''))
-    ));
-    $allowedOrigins = array_values(array_unique(array_merge([
-        'http://localhost:5173',
-        'http://localhost:5174',
-        'http://127.0.0.1:5173',
-        'http://127.0.0.1:5174',
-        'https://campus-eats-ashy.vercel.app',
-    ], $configuredOrigins)));
-    $origin = $request->getHeaderLine('Origin');
-    $allowOrigin = in_array($origin, $allowedOrigins, true) ? $origin : $allowedOrigins[0];
-
-    @set_time_limit(0);
-    ignore_user_abort(true);
-    if (function_exists('session_write_close')) {
-        session_write_close();
-    }
-    header('Content-Type: text/event-stream');
-    header('Cache-Control: no-cache');
-    header('Connection: keep-alive');
-    header('Content-Encoding: none');
-    header('X-Accel-Buffering: no');
-    header('Access-Control-Allow-Origin: ' . $allowOrigin);
-    header('Access-Control-Allow-Headers: Content-Type, Authorization');
-};
-
-$sendSseEvent = static function (string $event, array $payload): void {
-    echo 'event: ' . $event . "\n";
-    echo 'data: ' . json_encode($payload, JSON_UNESCAPED_SLASHES) . "\n\n";
-    if (function_exists('ob_flush') && ob_get_level() > 0) {
-        @ob_flush();
-    }
-    if (function_exists('flush')) {
-        flush();
-    }
 };
 
 $createNotification = static function (PDO $db, string $userId, string $message): void {
@@ -661,58 +598,6 @@ $app->get('/api/student/orders', function (
     return jsonResponse($response, ['orders' => $orders]);
 })->add(new RoleMiddleware(['student']))->add(new JwtMiddleware());
 
-$app->get('/api/student/orders/{id}/stream', function (
-    ServerRequestInterface $request,
-    ResponseInterface $response,
-    array $args
-) use ($fetchOrder, $decodeStreamAuth, $openSseStream, $sendSseEvent) {
-    $auth = $decodeStreamAuth($request);
-    if (!$auth || ($auth['role'] ?? null) !== 'student') {
-        return jsonResponse($response, ['error' => 'Valid student token is required'], 401);
-    }
-
-    $db = Database::connect();
-    $order = $fetchOrder($db, $args['id']);
-    if (!$order) {
-        return jsonResponse($response, ['error' => 'Order not found'], 404);
-    }
-    if ($order['customer_id'] !== $auth['sub']) {
-        return jsonResponse($response, ['error' => 'You cannot stream this order'], 403);
-    }
-
-    $openSseStream($request);
-    $lastHash = null;
-
-    while (!connection_aborted()) {
-        $order = $fetchOrder($db, $args['id']);
-        if (!$order || $order['customer_id'] !== $auth['sub']) {
-            $sendSseEvent('order_status_update', ['error' => 'Order no longer available']);
-            break;
-        }
-
-        unset($order['customer_id']);
-        $hash = md5(json_encode($order));
-        if ($hash !== $lastHash) {
-            $sendSseEvent('order_status_update', ['order' => $order]);
-            $lastHash = $hash;
-        } else {
-            echo ": keep-alive\n\n";
-            if (function_exists('ob_flush') && ob_get_level() > 0) {
-                @ob_flush();
-            }
-            if (function_exists('flush')) {
-                flush();
-            }
-        }
-
-        if (($order['status'] ?? null) === 'collected') {
-            break;
-        }
-        sleep(5);
-    }
-    exit;
-});
-
 $app->get('/api/vendor/orders', function (
     ServerRequestInterface $request,
     ResponseInterface $response
@@ -725,44 +610,6 @@ $app->get('/api/vendor/orders', function (
 
     return jsonResponse($response, ['orders' => $fetchVendorOrders($db, $vendor['id'])]);
 })->add(new RoleMiddleware(['vendor']))->add(new JwtMiddleware());
-
-$app->get('/api/vendor/orders/stream', function (
-    ServerRequestInterface $request,
-    ResponseInterface $response
-) use ($fetchVendorOrders, $findOwnedVendor, $decodeStreamAuth, $openSseStream, $sendSseEvent) {
-    $auth = $decodeStreamAuth($request);
-    if (!$auth || ($auth['role'] ?? null) !== 'vendor') {
-        return jsonResponse($response, ['error' => 'Valid vendor token is required'], 401);
-    }
-
-    $db = Database::connect();
-    $vendor = $findOwnedVendor($db, $auth['sub']);
-    if (!$vendor) {
-        return jsonResponse($response, ['error' => 'Vendor account not found'], 404);
-    }
-
-    $openSseStream($request);
-    $lastHash = null;
-
-    while (!connection_aborted()) {
-        $orders = $fetchVendorOrders($db, $vendor['id']);
-        $hash = md5(json_encode($orders));
-        if ($hash !== $lastHash) {
-            $sendSseEvent('orders_update', ['orders' => $orders]);
-            $lastHash = $hash;
-        } else {
-            echo ": keep-alive\n\n";
-            if (function_exists('ob_flush') && ob_get_level() > 0) {
-                @ob_flush();
-            }
-            if (function_exists('flush')) {
-                flush();
-            }
-        }
-        sleep(5);
-    }
-    exit;
-});
 
 $app->patch('/api/orders/{id}/status', function (
     ServerRequestInterface $request,

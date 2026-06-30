@@ -49,16 +49,9 @@ const order = ref(null)
 const loading = ref(true)
 const error = ref('')
 const lastLoadedAt = ref(null)
-const streamConnected = ref(false)
 let pollTimer
-let orderStream
-const sseEnabled = import.meta.env.VITE_ENABLE_SSE === 'true'
 
-const trackingSubtitle = computed(() => {
-  if (streamConnected.value) return 'Tracking updates automatically with live updates.'
-  if (!sseEnabled) return 'SSE disabled. Tracking updates every 5 seconds.'
-  return 'Connecting live tracking. Polling is used only if the stream fails.'
-})
+const trackingSubtitle = computed(() => 'Tracking updates automatically every 5 seconds.')
 
 const noticeTitle = computed(() => {
   if (order.value?.status === 'collected') return 'Your order has been collected'
@@ -82,7 +75,6 @@ async function fetchOrder({ quiet = false } = {}) {
     lastLoadedAt.value = new Date()
     if (order.value?.status === 'collected') {
       stopPolling()
-      closeOrderStream()
     }
   } catch (requestError) {
     error.value = requestError.response?.data?.error || 'Please check the order link and try again.'
@@ -103,59 +95,6 @@ function stopPolling() {
   pollTimer = null
 }
 
-function closeOrderStream() {
-  orderStream?.close()
-  orderStream = null
-  streamConnected.value = false
-}
-
-function streamUrl() {
-  const token = localStorage.getItem('token')
-  if (!token) return null
-  const baseUrl = api.defaults.baseURL || 'http://localhost:8000/api'
-  return `${baseUrl}/student/orders/${route.params.id}/stream?token=${encodeURIComponent(token)}`
-}
-
-function startOrderStream() {
-  if (!sseEnabled || order.value?.status === 'collected' || typeof EventSource === 'undefined') {
-    startPolling()
-    return
-  }
-  if (orderStream) return
-
-  const url = streamUrl()
-  if (!url) {
-    startPolling()
-    return
-  }
-
-  stopPolling()
-  orderStream = new EventSource(url)
-  orderStream.addEventListener('order_status_update', (event) => {
-    try {
-      const payload = JSON.parse(event.data)
-      if (payload.order) {
-        order.value = payload.order
-        lastLoadedAt.value = new Date()
-        error.value = ''
-        streamConnected.value = true
-        stopPolling()
-
-        if (order.value.status === 'collected') {
-          closeOrderStream()
-        }
-      }
-    } catch {
-      closeOrderStream()
-      startPolling()
-    }
-  })
-  orderStream.onerror = () => {
-    closeOrderStream()
-    startPolling()
-  }
-}
-
 function money(value) { return Number(value).toFixed(2) }
 function formatStatus(status = '') { return status.charAt(0).toUpperCase() + status.slice(1) }
 function shortId(value = '') { return value.split('-')[0].toUpperCase() }
@@ -166,12 +105,11 @@ function formatPickup(value) {
 
 onMounted(async () => {
   await fetchOrder()
-  startOrderStream()
+  startPolling()
 })
 
 onBeforeUnmount(() => {
   stopPolling()
-  closeOrderStream()
 })
 </script>
 

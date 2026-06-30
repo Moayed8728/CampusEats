@@ -52,47 +52,20 @@ If `GEMINI_MODEL` is omitted, the backend defaults to `gemini-1.5-flash`. If Gem
 
 ## Real-Time Updates
 
-CampusEats uses Server-Sent Events for lightweight real-time updates:
+CampusEats uses simple polling for order updates:
 
-- Vendor dashboard connects to `GET /api/vendor/orders/stream`
-- Student order status connects to `GET /api/student/orders/{id}/stream`
+- Vendor dashboard refreshes `GET /api/vendor/orders` every 5 seconds.
+- Student order status refreshes `GET /api/orders/{id}` every 5 seconds.
 
-The stream sends:
+Polling is intentionally kept simple for local demos and deployment stability. This is the only order update method in the active app.
 
-- `orders_update` for vendor order lists
-- `order_status_update` for one student order
-
-Browsers do not allow custom `Authorization` headers on `EventSource`, so the frontend passes the current JWT as a stream query parameter. Normal API calls still use the `Authorization: Bearer ...` header.
-
-Polling remains as a fallback. If the SSE connection fails, the vendor dashboard and order status page keep refreshing every 5 seconds.
-
-For local/demo stability, SSE is controlled by `frontend/.env`:
-
-```env
-VITE_ENABLE_SSE=true
-```
-
-- `VITE_ENABLE_SSE=false`: polling only, no `EventSource` connections are opened.
-- `VITE_ENABLE_SSE=true`: use SSE as the primary real-time connection. Polling starts only if the stream fails.
-
-If `VITE_ENABLE_SSE` is missing, the frontend uses polling. Restart the Vite dev server or redeploy Vercel after changing this flag.
-
-To test SSE in the browser:
+To test polling in the browser:
 
 1. Login as `vendor@test.com` and open `/vendor/dashboard`.
-2. Open DevTools > Network and filter by `stream`.
-3. Confirm there is one `/api/vendor/orders/stream?...` request with type `eventstream`.
-4. In another session, place or update an order and watch the dashboard update.
-5. Login as `student@test.com` and open an order status page.
-6. Confirm there is one `/api/student/orders/{id}/stream?...` eventstream request.
-7. Update that order from the vendor dashboard and confirm the student status changes live.
-
-To test with curl, login first to get a JWT, then call:
-
-```powershell
-curl.exe -N "http://localhost:8000/api/vendor/orders/stream?token=YOUR_VENDOR_JWT"
-curl.exe -N "http://localhost:8000/api/student/orders/ORDER_ID/stream?token=YOUR_STUDENT_JWT"
-```
+2. Open DevTools > Network and filter by `vendor/orders`.
+3. Confirm the request repeats roughly every 5 seconds.
+4. Login as `student@test.com` and open an order status page.
+5. Update that order from the vendor dashboard and confirm the student page updates on the next poll.
 
 ## Database Import
 

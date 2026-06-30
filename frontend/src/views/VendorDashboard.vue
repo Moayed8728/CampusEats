@@ -86,11 +86,8 @@ const error = ref('')
 const successMessage = ref('')
 const actionError = ref('')
 const updatingOrderId = ref(null)
-const streamConnected = ref(false)
 let messageTimer
 let pollTimer
-let orderStream
-const sseEnabled = import.meta.env.VITE_ENABLE_SSE === 'true'
 
 const todayLabel = new Intl.DateTimeFormat('en-MY', {
   weekday: 'long', day: 'numeric', month: 'long'
@@ -134,60 +131,7 @@ function stopPolling() {
   pollTimer = null
 }
 
-function closeOrderStream() {
-  orderStream?.close()
-  orderStream = null
-  streamConnected.value = false
-}
-
-const refreshNote = computed(() => {
-  if (streamConnected.value) return 'Live updates connected. Polling is available as fallback.'
-  if (!sseEnabled) return 'SSE disabled. Polling every 5 seconds.'
-  return 'Connecting live updates. Polling is used only if the stream fails.'
-})
-
-function streamUrl() {
-  const token = localStorage.getItem('token')
-  if (!token) return null
-  const baseUrl = api.defaults.baseURL || 'http://localhost:8000/api'
-  return `${baseUrl}/vendor/orders/stream?token=${encodeURIComponent(token)}`
-}
-
-function startOrderStream() {
-  if (!sseEnabled || typeof EventSource === 'undefined') {
-    startPolling()
-    return
-  }
-  if (orderStream) {
-    return
-  }
-
-  const url = streamUrl()
-  if (!url) {
-    startPolling()
-    return
-  }
-
-  stopPolling()
-  orderStream = new EventSource(url)
-  orderStream.addEventListener('orders_update', (event) => {
-    try {
-      const payload = JSON.parse(event.data)
-      orders.value = payload.orders ?? []
-      error.value = ''
-      loading.value = false
-      streamConnected.value = true
-      stopPolling()
-    } catch {
-      closeOrderStream()
-      startPolling()
-    }
-  })
-  orderStream.onerror = () => {
-    closeOrderStream()
-    startPolling()
-  }
-}
+const refreshNote = computed(() => 'Auto-refreshing every 5 seconds.')
 
 const statusGroups = computed(() => [
   { key: 'placed', label: 'Placed', empty: 'No placed orders', orders: ordersByStatus('placed') },
@@ -238,14 +182,13 @@ const topItem = computed(() => {
 })
 
 onMounted(async () => {
-  startOrderStream()
   await fetchOrders()
+  startPolling()
 })
 
 onBeforeUnmount(() => {
   stopPolling()
   clearTimeout(messageTimer)
-  closeOrderStream()
 })
 </script>
 
