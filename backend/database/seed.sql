@@ -1,4 +1,4 @@
-USE campuseats;
+USE defaultdb;
 
 -- All demo accounts use the password: 123456
 INSERT INTO users (id, name, email, password_hash, role) VALUES

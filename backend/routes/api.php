@@ -86,14 +86,19 @@ $decodeStreamAuth = static function (ServerRequestInterface $request): ?array {
 };
 
 $openSseStream = static function (ServerRequestInterface $request): void {
-    $allowedOrigins = [
+    $configuredOrigins = array_filter(array_map(
+        'trim',
+        explode(',', (string) ($_ENV['CORS_ALLOWED_ORIGINS'] ?? $_ENV['FRONTEND_URL'] ?? ''))
+    ));
+    $allowedOrigins = array_values(array_unique(array_merge([
         'http://localhost:5173',
         'http://localhost:5174',
         'http://127.0.0.1:5173',
         'http://127.0.0.1:5174',
-    ];
+        'https://campus-eats-ashy.vercel.app',
+    ], $configuredOrigins)));
     $origin = $request->getHeaderLine('Origin');
-    $allowOrigin = in_array($origin, $allowedOrigins, true) ? $origin : 'http://localhost:5173';
+    $allowOrigin = in_array($origin, $allowedOrigins, true) ? $origin : $allowedOrigins[0];
 
     @set_time_limit(0);
     ignore_user_abort(true);
@@ -112,10 +117,12 @@ $openSseStream = static function (ServerRequestInterface $request): void {
 $sendSseEvent = static function (string $event, array $payload): void {
     echo 'event: ' . $event . "\n";
     echo 'data: ' . json_encode($payload, JSON_UNESCAPED_SLASHES) . "\n\n";
-    if (ob_get_level() > 0) {
+    if (function_exists('ob_flush') && ob_get_level() > 0) {
         @ob_flush();
     }
-    flush();
+    if (function_exists('flush')) {
+        flush();
+    }
 };
 
 $createNotification = static function (PDO $db, string $userId, string $message): void {
@@ -690,10 +697,12 @@ $app->get('/api/student/orders/{id}/stream', function (
             $lastHash = $hash;
         } else {
             echo ": keep-alive\n\n";
-            if (ob_get_level() > 0) {
+            if (function_exists('ob_flush') && ob_get_level() > 0) {
                 @ob_flush();
             }
-            flush();
+            if (function_exists('flush')) {
+                flush();
+            }
         }
 
         if (($order['status'] ?? null) === 'collected') {
@@ -743,10 +752,12 @@ $app->get('/api/vendor/orders/stream', function (
             $lastHash = $hash;
         } else {
             echo ": keep-alive\n\n";
-            if (ob_get_level() > 0) {
+            if (function_exists('ob_flush') && ob_get_level() > 0) {
                 @ob_flush();
             }
-            flush();
+            if (function_exists('flush')) {
+                flush();
+            }
         }
         sleep(5);
     }
