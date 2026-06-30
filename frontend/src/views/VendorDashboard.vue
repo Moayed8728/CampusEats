@@ -175,6 +175,7 @@ function startOrderStream() {
       const payload = JSON.parse(event.data)
       orders.value = payload.orders ?? []
       error.value = ''
+      loading.value = false
       streamConnected.value = true
       stopPolling()
     } catch {
@@ -237,8 +238,8 @@ const topItem = computed(() => {
 })
 
 onMounted(async () => {
-  await fetchOrders()
   startOrderStream()
+  await fetchOrders()
 })
 
 onBeforeUnmount(() => {
