@@ -52,7 +52,7 @@ const lastLoadedAt = ref(null)
 const streamConnected = ref(false)
 let pollTimer
 let orderStream
-const sseEnabled = import.meta.env.PROD || import.meta.env.VITE_ENABLE_SSE !== 'false'
+const sseEnabled = import.meta.env.VITE_ENABLE_SSE === 'true'
 
 const trackingSubtitle = computed(() => {
   if (streamConnected.value) return 'Tracking updates automatically with live updates.'
