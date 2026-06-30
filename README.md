@@ -72,8 +72,8 @@ For local/demo stability, SSE is controlled by `frontend/.env`:
 VITE_ENABLE_SSE=true
 ```
 
-- `VITE_ENABLE_SSE=true`: use SSE as the primary real-time connection. Polling starts only if the stream fails.
-- `VITE_ENABLE_SSE=false`: polling only, no `EventSource` connections are opened.
+- Production builds use SSE as the primary real-time connection. Polling starts only if the stream fails.
+- In local development, `VITE_ENABLE_SSE=false` forces polling only.
 
 If `VITE_ENABLE_SSE` is missing, the frontend treats SSE as enabled. Restart the Vite dev server or redeploy Vercel after changing this flag.
 
