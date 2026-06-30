@@ -38,7 +38,13 @@ $app->add(function (ServerRequestInterface $request, $handler) {
         'https://campus-eats-ashy.vercel.app',
     ], $configuredOrigins)));
     $origin = $request->getHeaderLine('Origin');
-    $allowOrigin = in_array($origin, $allowedOrigins, true) ? $origin : $allowedOrigins[0];
+    $isVercelPreview = (bool) preg_match(
+        '/^https:\/\/campus-eats-[a-z0-9-]+-moayed8728s-projects\.vercel\.app$/i',
+        $origin
+    );
+    $allowOrigin = (in_array($origin, $allowedOrigins, true) || $isVercelPreview)
+        ? $origin
+        : $allowedOrigins[0];
 
     if ($request->getMethod() === 'OPTIONS') {
         $response = new Response();
