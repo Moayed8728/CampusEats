@@ -71,7 +71,7 @@ To test polling in the browser:
 
 Students earn loyalty points when an order is marked `collected` by the vendor.
 
-- RM1 = 1 point
+- RM1 = 100 points
 - Points are awarded once per order
 - Students can view their balance and point history at `/rewards`
 - Existing collected orders are backfilled when rewards are viewed

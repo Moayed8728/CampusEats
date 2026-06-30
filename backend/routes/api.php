@@ -70,7 +70,7 @@ $createNotification = static function (PDO $db, string $userId, string $message)
 };
 
 $awardLoyaltyPoints = static function (PDO $db, array $order): int {
-    $points = max(0, (int) floor((float) $order['total']));
+    $points = max(0, (int) floor((float) $order['total'] * 100));
     if ($points === 0) {
         return 0;
     }
@@ -92,7 +92,7 @@ $awardLoyaltyPoints = static function (PDO $db, array $order): int {
 
 $syncLoyaltyPoints = static function (PDO $db, ?string $studentId = null): int {
     $sql = "INSERT IGNORE INTO loyalty_transactions (id, student_id, order_id, points, description, created_at)
-            SELECT UUID(), o.customer_id, o.id, FLOOR(o.total),
+            SELECT UUID(), o.customer_id, o.id, FLOOR(o.total * 100),
                    CONCAT('Earned from order #', UPPER(LEFT(o.id, 8))),
                    COALESCE(o.updated_at, o.created_at)
             FROM orders o
@@ -675,7 +675,7 @@ $app->get('/api/rewards', function (
         return $transaction;
     }, $transactions->fetchAll());
     $pointsBalance = (int) $balance->fetchColumn();
-    $milestones = [25, 50, 100, 200];
+    $milestones = [2500, 5000, 10000, 20000];
     $nextMilestone = null;
     foreach ($milestones as $milestone) {
         if ($pointsBalance < $milestone) {
@@ -684,12 +684,12 @@ $app->get('/api/rewards', function (
         }
     }
     if ($nextMilestone === null) {
-        $nextMilestone = $pointsBalance + 50;
+        $nextMilestone = $pointsBalance + 5000;
     }
 
     return jsonResponse($response, [
         'balance' => $pointsBalance,
-        'rate' => 'RM1 = 1 point',
+        'rate' => 'RM1 = 100 points',
         'collected_orders' => (int) $collectedOrders->fetchColumn(),
         'next_milestone' => $nextMilestone,
         'points_to_next_milestone' => max(0, $nextMilestone - $pointsBalance),
