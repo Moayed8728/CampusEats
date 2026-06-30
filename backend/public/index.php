@@ -38,11 +38,11 @@ $app->add(function (ServerRequestInterface $request, $handler) {
         'https://campus-eats-ashy.vercel.app',
     ], $configuredOrigins)));
     $origin = $request->getHeaderLine('Origin');
-    $isVercelPreview = (bool) preg_match(
-        '/^https:\/\/campus-eats-[a-z0-9-]+-moayed8728s-projects\.vercel\.app$/i',
+    $isVercelDeployment = (bool) preg_match(
+        '/^https:\/\/(?:campus-eats|campuseats)[a-z0-9-]*\.vercel\.app$/i',
         $origin
     );
-    $allowOrigin = (in_array($origin, $allowedOrigins, true) || $isVercelPreview)
+    $allowOrigin = (in_array($origin, $allowedOrigins, true) || $isVercelDeployment)
         ? $origin
         : $allowedOrigins[0];
 
