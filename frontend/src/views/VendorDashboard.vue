@@ -90,7 +90,7 @@ const streamConnected = ref(false)
 let messageTimer
 let pollTimer
 let orderStream
-const sseEnabled = import.meta.env.VITE_ENABLE_SSE === 'true'
+const sseEnabled = import.meta.env.VITE_ENABLE_SSE !== 'false'
 
 const todayLabel = new Intl.DateTimeFormat('en-MY', {
   weekday: 'long', day: 'numeric', month: 'long'

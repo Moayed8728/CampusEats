@@ -69,21 +69,23 @@ Polling remains as a fallback. If the SSE connection fails, the vendor dashboard
 For local/demo stability, SSE is controlled by `frontend/.env`:
 
 ```env
-VITE_ENABLE_SSE=false
+VITE_ENABLE_SSE=true
 ```
 
+- `VITE_ENABLE_SSE=true`: use SSE as the primary real-time connection. Polling starts only if the stream fails.
 - `VITE_ENABLE_SSE=false`: polling only, no `EventSource` connections are opened.
-- `VITE_ENABLE_SSE=true`: try SSE first, then fall back to 5-second polling if SSE fails.
 
-Restart the Vite dev server after changing this flag.
+If `VITE_ENABLE_SSE` is missing, the frontend treats SSE as enabled. Restart the Vite dev server or redeploy Vercel after changing this flag.
 
 To test SSE in the browser:
 
 1. Login as `vendor@test.com` and open `/vendor/dashboard`.
-2. Confirm the dashboard says live updates are connected, or falls back to 5-second polling if the stream fails.
-3. In another session, place or update an order and watch the dashboard update.
-4. Login as `student@test.com` and open an order status page.
-5. Update that order from the vendor dashboard and confirm the student status changes live.
+2. Open DevTools > Network and filter by `stream`.
+3. Confirm there is one `/api/vendor/orders/stream?...` request with type `eventstream`.
+4. In another session, place or update an order and watch the dashboard update.
+5. Login as `student@test.com` and open an order status page.
+6. Confirm there is one `/api/student/orders/{id}/stream?...` eventstream request.
+7. Update that order from the vendor dashboard and confirm the student status changes live.
 
 To test with curl, login first to get a JWT, then call:
 
