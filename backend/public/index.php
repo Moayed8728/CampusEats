@@ -26,14 +26,19 @@ $app->options('/{routes:.*}', function ($request, $response) {
 });
 
 $app->add(function (ServerRequestInterface $request, $handler) {
-    $allowedOrigins = [
+    $configuredOrigins = array_filter(array_map(
+        'trim',
+        explode(',', (string) ($_ENV['CORS_ALLOWED_ORIGINS'] ?? $_ENV['FRONTEND_URL'] ?? ''))
+    ));
+    $allowedOrigins = array_values(array_unique(array_merge([
         'http://localhost:5173',
         'http://localhost:5174',
         'http://127.0.0.1:5173',
         'http://127.0.0.1:5174',
-    ];
+        'https://campus-eats-ashy.vercel.app',
+    ], $configuredOrigins)));
     $origin = $request->getHeaderLine('Origin');
-    $allowOrigin = in_array($origin, $allowedOrigins, true) ? $origin : 'http://localhost:5173';
+    $allowOrigin = in_array($origin, $allowedOrigins, true) ? $origin : $allowedOrigins[0];
 
     if ($request->getMethod() === 'OPTIONS') {
         $response = new Response();
