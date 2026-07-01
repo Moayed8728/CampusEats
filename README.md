@@ -143,6 +143,14 @@ php -r "`$pdo=new PDO('mysql:host=localhost;port=3306;charset=utf8mb4','root','r
 - Vendor: `vendor@test.com` / `123456`
 - Admin: `admin@test.com` / `123456`
 
+The seed includes multiple active vendors so the student marketplace looks realistic during demo. `vendor@test.com` owns Campus Nasi Corner and can manage its own menu from `/vendor/menu`.
+
+## Project Documentation
+
+- ER diagram: [docs/ER_DIAGRAM.md](docs/ER_DIAGRAM.md)
+- API contract: [docs/API_CONTRACT.md](docs/API_CONTRACT.md)
+- Deployment guide: [docs/DEPLOYMENT_GUIDE.md](docs/DEPLOYMENT_GUIDE.md)
+
 ## Run Locally
 
 Backend:
@@ -173,7 +181,9 @@ Default URLs:
 5. Use Recommendations and AI Assistant to add suggested meals to cart.
 6. Login as `vendor@test.com`.
 7. View dashboard, update order status, and confirm dashboard auto-refresh.
-8. Login as `student@test.com` again and view notifications.
-9. Open a collected order and submit a review.
-10. Login as `admin@test.com`.
-11. View admin dashboard, users, vendors, and orders.
+8. Open vendor Menu, then add, edit, hide, and delete a menu item.
+9. Login as `student@test.com` again and view notifications.
+10. Open a collected order and submit a review.
+11. Login as `admin@test.com`.
+12. View admin dashboard, users, vendors, vendor applications, rewards, and orders.
+13. Deactivate or remove a vendor from the admin Vendors page.
