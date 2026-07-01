@@ -104,9 +104,15 @@ async function fetchOrders({ quiet = false } = {}) {
     orders.value = data.orders ?? []
   } catch (requestError) {
     if (requestError.response?.status === 401) {
+      stopPolling()
       localStorage.removeItem('token')
       localStorage.removeItem('user')
       await router.push('/login')
+      return
+    }
+    if (requestError.response?.status === 403) {
+      stopPolling()
+      error.value = 'This page needs a vendor account. Please logout and sign in as vendor@test.com.'
       return
     }
     error.value = requestError.response?.data?.error || 'Please check the API and try again.'
@@ -183,7 +189,7 @@ const topItem = computed(() => {
 
 onMounted(async () => {
   await fetchOrders()
-  startPolling()
+  if (!error.value) startPolling()
 })
 
 onBeforeUnmount(() => {
