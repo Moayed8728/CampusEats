@@ -331,6 +331,52 @@ $validateVendorApplicationData = static function (array $data) use ($looksLikeWo
     return $clean;
 };
 
+$normalizeMenuItemData = static function (array $data, bool $partial = false): array {
+    $allowedCategories = ['Rice', 'Noodles', 'Drinks', 'Snacks'];
+    $clean = [];
+    $errors = [];
+
+    if (!$partial || array_key_exists('name', $data)) {
+        $name = trim((string) ($data['name'] ?? ''));
+        if (strlen($name) < 3 || strlen($name) > 160 || !preg_match('/[a-z0-9]{2,}/i', $name)) {
+            $errors['name'] = 'Name must be 3-160 characters and include readable text.';
+        }
+        $clean['name'] = $name;
+    }
+    if (!$partial || array_key_exists('description', $data)) {
+        $description = trim((string) ($data['description'] ?? ''));
+        if (strlen($description) > 500) {
+            $errors['description'] = 'Description must be 500 characters or less.';
+        }
+        $clean['description'] = $description;
+    }
+    if (!$partial || array_key_exists('price', $data)) {
+        $price = filter_var($data['price'] ?? null, FILTER_VALIDATE_FLOAT);
+        if ($price === false || $price <= 0 || $price > 999.99) {
+            $errors['price'] = 'Price must be between RM0.01 and RM999.99.';
+        }
+        $clean['price'] = round((float) $price, 2);
+    }
+    if (!$partial || array_key_exists('category', $data)) {
+        $category = trim((string) ($data['category'] ?? ''));
+        if (!in_array($category, $allowedCategories, true)) {
+            $errors['category'] = 'Category must be Rice, Noodles, Drinks, or Snacks.';
+        }
+        $clean['category'] = $category;
+    }
+    foreach (['is_halal', 'is_vegetarian', 'in_stock'] as $field) {
+        if (!$partial || array_key_exists($field, $data)) {
+            $clean[$field] = filter_var($data[$field] ?? false, FILTER_VALIDATE_BOOLEAN) ? 1 : 0;
+        }
+    }
+
+    if ($errors) {
+        throw new InvalidArgumentException(json_encode($errors));
+    }
+
+    return $clean;
+};
+
 $normalizePaymentData = static function (array $data): array {
     $paymentStatus = strtolower(trim((string) ($data['payment_status'] ?? 'mock_paid')));
     $paymentMethod = strtolower(trim((string) ($data['payment_method'] ?? 'mock')));
@@ -488,7 +534,7 @@ $app->get('/api/auth/me', function (ServerRequestInterface $request, ResponseInt
 $app->get('/api/vendors', function (ServerRequestInterface $request, ResponseInterface $response) {
     $db = Database::connect();
     $vendors = $db->query(
-        'SELECT id, name, description FROM vendors WHERE is_active = 1 ORDER BY name'
+        'SELECT id, name, description, location, opening_hours FROM vendors WHERE is_active = 1 ORDER BY name'
     )->fetchAll();
 
     return jsonResponse($response, ['vendors' => $vendors]);
@@ -523,6 +569,174 @@ $app->get('/api/vendors/{id}/menu', function (
 
     return jsonResponse($response, ['vendor' => $vendorData, 'menu_items' => $items]);
 });
+
+$app->get('/api/vendor/menu', function (
+    ServerRequestInterface $request,
+    ResponseInterface $response
+) use ($findOwnedVendor) {
+    $db = Database::connect();
+    $vendor = $findOwnedVendor($db, getAuthUser($request)['sub']);
+    if (!$vendor) {
+        return jsonResponse($response, ['error' => 'Vendor account not found'], 404);
+    }
+
+    $statement = $db->prepare(
+        'SELECT id, vendor_id, name, description, price, category, is_halal, is_vegetarian, in_stock, created_at
+         FROM menu_items WHERE vendor_id = ? ORDER BY in_stock DESC, name'
+    );
+    $statement->execute([$vendor['id']]);
+    $items = array_map(static function (array $item): array {
+        $item['price'] = (float) $item['price'];
+        $item['is_halal'] = (bool) $item['is_halal'];
+        $item['is_vegetarian'] = (bool) $item['is_vegetarian'];
+        $item['in_stock'] = (bool) $item['in_stock'];
+        return $item;
+    }, $statement->fetchAll());
+
+    return jsonResponse($response, ['vendor' => $vendor, 'menu_items' => $items]);
+})->add(new RoleMiddleware(['vendor']))->add(new JwtMiddleware());
+
+$app->post('/api/vendor/menu-items', function (
+    ServerRequestInterface $request,
+    ResponseInterface $response
+) use ($findOwnedVendor, $normalizeMenuItemData) {
+    try {
+        $clean = $normalizeMenuItemData((array) $request->getParsedBody());
+    } catch (InvalidArgumentException $e) {
+        return jsonResponse($response, [
+            'error' => 'Please check the menu item details.',
+            'fields' => json_decode($e->getMessage(), true) ?: [],
+        ], 400);
+    }
+
+    $db = Database::connect();
+    $vendor = $findOwnedVendor($db, getAuthUser($request)['sub']);
+    if (!$vendor) {
+        return jsonResponse($response, ['error' => 'Vendor account not found'], 404);
+    }
+
+    $item = [
+        'id' => uuid(),
+        'vendor_id' => $vendor['id'],
+        ...$clean,
+    ];
+    $statement = $db->prepare(
+        'INSERT INTO menu_items
+            (id, vendor_id, name, description, price, category, is_halal, is_vegetarian, in_stock)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
+    );
+    $statement->execute([
+        $item['id'],
+        $item['vendor_id'],
+        $item['name'],
+        $item['description'],
+        $item['price'],
+        $item['category'],
+        $item['is_halal'],
+        $item['is_vegetarian'],
+        $item['in_stock'],
+    ]);
+    $item['price'] = (float) $item['price'];
+    $item['is_halal'] = (bool) $item['is_halal'];
+    $item['is_vegetarian'] = (bool) $item['is_vegetarian'];
+    $item['in_stock'] = (bool) $item['in_stock'];
+
+    return jsonResponse($response, ['menu_item' => $item], 201);
+})->add(new RoleMiddleware(['vendor']))->add(new JwtMiddleware());
+
+$app->patch('/api/vendor/menu-items/{id}', function (
+    ServerRequestInterface $request,
+    ResponseInterface $response,
+    array $args
+) use ($findOwnedVendor, $normalizeMenuItemData) {
+    try {
+        $clean = $normalizeMenuItemData((array) $request->getParsedBody());
+    } catch (InvalidArgumentException $e) {
+        return jsonResponse($response, [
+            'error' => 'Please check the menu item details.',
+            'fields' => json_decode($e->getMessage(), true) ?: [],
+        ], 400);
+    }
+
+    $db = Database::connect();
+    $vendor = $findOwnedVendor($db, getAuthUser($request)['sub']);
+    if (!$vendor) {
+        return jsonResponse($response, ['error' => 'Vendor account not found'], 404);
+    }
+
+    $statement = $db->prepare(
+        'UPDATE menu_items
+         SET name = ?, description = ?, price = ?, category = ?, is_halal = ?, is_vegetarian = ?, in_stock = ?
+         WHERE id = ? AND vendor_id = ?'
+    );
+    $statement->execute([
+        $clean['name'],
+        $clean['description'],
+        $clean['price'],
+        $clean['category'],
+        $clean['is_halal'],
+        $clean['is_vegetarian'],
+        $clean['in_stock'],
+        $args['id'],
+        $vendor['id'],
+    ]);
+
+    if ($statement->rowCount() === 0) {
+        $exists = $db->prepare('SELECT id FROM menu_items WHERE id = ? AND vendor_id = ?');
+        $exists->execute([$args['id'], $vendor['id']]);
+        if (!$exists->fetch()) {
+            return jsonResponse($response, ['error' => 'Menu item not found'], 404);
+        }
+    }
+
+    $item = $db->prepare(
+        'SELECT id, vendor_id, name, description, price, category, is_halal, is_vegetarian, in_stock, created_at
+         FROM menu_items WHERE id = ? AND vendor_id = ?'
+    );
+    $item->execute([$args['id'], $vendor['id']]);
+    $updated = $item->fetch();
+    $updated['price'] = (float) $updated['price'];
+    $updated['is_halal'] = (bool) $updated['is_halal'];
+    $updated['is_vegetarian'] = (bool) $updated['is_vegetarian'];
+    $updated['in_stock'] = (bool) $updated['in_stock'];
+
+    return jsonResponse($response, ['menu_item' => $updated]);
+})->add(new RoleMiddleware(['vendor']))->add(new JwtMiddleware());
+
+$app->delete('/api/vendor/menu-items/{id}', function (
+    ServerRequestInterface $request,
+    ResponseInterface $response,
+    array $args
+) use ($findOwnedVendor) {
+    $db = Database::connect();
+    $vendor = $findOwnedVendor($db, getAuthUser($request)['sub']);
+    if (!$vendor) {
+        return jsonResponse($response, ['error' => 'Vendor account not found'], 404);
+    }
+
+    $item = $db->prepare('SELECT id FROM menu_items WHERE id = ? AND vendor_id = ?');
+    $item->execute([$args['id'], $vendor['id']]);
+    if (!$item->fetch()) {
+        return jsonResponse($response, ['error' => 'Menu item not found'], 404);
+    }
+
+    $orderItems = $db->prepare('SELECT COUNT(*) FROM order_items WHERE menu_item_id = ?');
+    $orderItems->execute([$args['id']]);
+    if ((int) $orderItems->fetchColumn() > 0) {
+        $statement = $db->prepare('UPDATE menu_items SET in_stock = 0 WHERE id = ? AND vendor_id = ?');
+        $statement->execute([$args['id'], $vendor['id']]);
+        return jsonResponse($response, [
+            'message' => 'Menu item removed from sale because it has order history.',
+            'deleted' => false,
+            'in_stock' => false,
+        ]);
+    }
+
+    $statement = $db->prepare('DELETE FROM menu_items WHERE id = ? AND vendor_id = ?');
+    $statement->execute([$args['id'], $vendor['id']]);
+
+    return jsonResponse($response, ['message' => 'Menu item deleted', 'deleted' => true]);
+})->add(new RoleMiddleware(['vendor']))->add(new JwtMiddleware());
 
 $app->get('/api/recommendations', function (
     ServerRequestInterface $request,
@@ -993,7 +1207,7 @@ $app->get('/api/vendor/orders', function (
         return jsonResponse($response, ['error' => 'Vendor account not found'], 404);
     }
 
-    return jsonResponse($response, ['orders' => $fetchVendorOrders($db, $vendor['id'])]);
+    return jsonResponse($response, ['vendor' => $vendor, 'orders' => $fetchVendorOrders($db, $vendor['id'])]);
 })->add(new RoleMiddleware(['vendor']))->add(new JwtMiddleware());
 
 $app->patch('/api/orders/{id}/status', function (
@@ -1374,6 +1588,57 @@ $app->patch('/api/admin/vendors/{id}/toggle-active', function (
         'id' => $args['id'],
         'is_active' => (bool) $nextActive,
     ]]);
+})->add(new RoleMiddleware(['admin']))->add(new JwtMiddleware());
+
+$app->delete('/api/admin/vendors/{id}', function (
+    ServerRequestInterface $request,
+    ResponseInterface $response,
+    array $args
+) {
+    $db = Database::connect();
+    $statement = $db->prepare('SELECT id, owner_id, name FROM vendors WHERE id = ?');
+    $statement->execute([$args['id']]);
+    $vendor = $statement->fetch();
+    if (!$vendor) {
+        return jsonResponse($response, ['error' => 'Vendor not found'], 404);
+    }
+
+    $orders = $db->prepare('SELECT COUNT(*) FROM orders WHERE vendor_id = ?');
+    $orders->execute([$args['id']]);
+    if ((int) $orders->fetchColumn() > 0) {
+        $db->prepare('UPDATE vendors SET is_active = 0 WHERE id = ?')->execute([$args['id']]);
+        return jsonResponse($response, [
+            'message' => 'Vendor has order history, so it was removed from public listings instead of hard-deleted.',
+            'vendor' => [
+                'id' => $args['id'],
+                'name' => $vendor['name'],
+                'is_active' => false,
+                'deleted' => false,
+            ],
+        ]);
+    }
+
+    try {
+        $db->beginTransaction();
+        $db->prepare('DELETE FROM menu_items WHERE vendor_id = ?')->execute([$args['id']]);
+        $db->prepare('DELETE FROM vendors WHERE id = ?')->execute([$args['id']]);
+        $db->prepare("UPDATE users SET role = 'student' WHERE id = ? AND role = 'vendor'")->execute([$vendor['owner_id']]);
+        $db->commit();
+    } catch (Throwable $e) {
+        if ($db->inTransaction()) {
+            $db->rollBack();
+        }
+        throw $e;
+    }
+
+    return jsonResponse($response, [
+        'message' => 'Vendor deleted',
+        'vendor' => [
+            'id' => $args['id'],
+            'name' => $vendor['name'],
+            'deleted' => true,
+        ],
+    ]);
 })->add(new RoleMiddleware(['admin']))->add(new JwtMiddleware());
 
 $app->get('/api/admin/orders', function (ServerRequestInterface $request, ResponseInterface $response) {
