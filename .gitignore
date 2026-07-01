@@ -3,3 +3,4 @@ frontend/.env
 frontend/.env.development
 frontend/.env.production
 .env
+.phpunit.result.cache
