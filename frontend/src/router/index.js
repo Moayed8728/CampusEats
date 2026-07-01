@@ -12,12 +12,14 @@ import OrderHistory from '../views/OrderHistory.vue'
 import AdminPage from '../views/AdminPage.vue'
 import AdminUsers from '../views/AdminUsers.vue'
 import AdminVendors from '../views/AdminVendors.vue'
+import AdminVendorApplications from '../views/AdminVendorApplications.vue'
 import AdminOrders from '../views/AdminOrders.vue'
 import AdminRewards from '../views/AdminRewards.vue'
 import NotificationsPage from '../views/NotificationsPage.vue'
 import RecommendationsPage from '../views/RecommendationsPage.vue'
 import AIAssistantPage from '../views/AIAssistantPage.vue'
 import RewardsPage from '../views/RewardsPage.vue'
+import VendorApplicationPage from '../views/VendorApplicationPage.vue'
 
 const routes = [
   { path: '/', name: 'home', component: StudentHome, meta: { requiresAuth: true, roles: ['student'] } },
@@ -29,6 +31,7 @@ const routes = [
   { path: '/ai-assistant', name: 'ai-assistant', component: AIAssistantPage, meta: { requiresAuth: true, roles: ['student'] } },
   { path: '/notifications', name: 'notifications', component: NotificationsPage, meta: { requiresAuth: true, roles: ['student'] } },
   { path: '/rewards', name: 'rewards', component: RewardsPage, meta: { requiresAuth: true, roles: ['student'] } },
+  { path: '/vendor-application', name: 'vendor-application', component: VendorApplicationPage, meta: { requiresAuth: true, roles: ['student'] } },
   { path: '/orders/history', name: 'order-history', component: OrderHistory, meta: { requiresAuth: true, roles: ['student'] } },
   { path: '/orders/:id/tracking', name: 'order-tracking', component: OrderTracking, meta: { requiresAuth: true, roles: ['student'] } },
   { path: '/orders/:id', name: 'order-status', component: OrderStatus, meta: { requiresAuth: true } },
@@ -37,6 +40,7 @@ const routes = [
   { path: '/admin', name: 'admin', component: AdminPage, meta: { requiresAuth: true, roles: ['admin'] } },
   { path: '/admin/users', name: 'admin-users', component: AdminUsers, meta: { requiresAuth: true, roles: ['admin'] } },
   { path: '/admin/vendors', name: 'admin-vendors', component: AdminVendors, meta: { requiresAuth: true, roles: ['admin'] } },
+  { path: '/admin/vendor-applications', name: 'admin-vendor-applications', component: AdminVendorApplications, meta: { requiresAuth: true, roles: ['admin'] } },
   { path: '/admin/rewards', name: 'admin-rewards', component: AdminRewards, meta: { requiresAuth: true, roles: ['admin'] } },
   { path: '/admin/orders', name: 'admin-orders', component: AdminOrders, meta: { requiresAuth: true, roles: ['admin'] } }
 ]
