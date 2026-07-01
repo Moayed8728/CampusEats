@@ -35,9 +35,6 @@
           <button class="button button--small" :disabled="updatingId === vendor.id" @click="toggleVendor(vendor)">
             {{ updatingId === vendor.id ? 'Updating...' : vendor.is_active ? 'Deactivate' : 'Restore' }}
           </button>
-          <button v-if="vendor.is_active" class="button button--small button--danger" :disabled="removingId === vendor.id" @click="removeVendor(vendor)">
-            {{ removingId === vendor.id ? 'Removing...' : 'Remove' }}
-          </button>
         </div>
       </article>
     </div>
@@ -53,7 +50,6 @@ const loading = ref(true)
 const error = ref('')
 const message = ref('')
 const updatingId = ref(null)
-const removingId = ref(null)
 
 async function fetchVendors() {
   loading.value = true
@@ -82,26 +78,10 @@ async function toggleVendor(vendor) {
   }
 }
 
-async function removeVendor(vendor) {
-  if (!window.confirm(`Remove ${vendor.name} from public listings? You can restore it later.`)) return
-  removingId.value = vendor.id
-  message.value = ''
-  error.value = ''
-  try {
-    const { data } = await api.delete(`/admin/vendors/${vendor.id}`)
-    vendor.is_active = false
-    message.value = data.message || `${vendor.name} removed.`
-  } catch (requestError) {
-    error.value = requestError.response?.data?.error || 'Vendor could not be removed.'
-  } finally {
-    removingId.value = null
-  }
-}
-
 onMounted(fetchVendors)
 </script>
 
 <style scoped>
-.page-heading{margin-bottom:24px}.page-heading p{margin:0}.list-state{margin-top:24px}.feedback{display:inline-block;margin:0 0 16px;padding:10px 13px;border-radius:999px;font-size:.8rem;font-weight:800}.feedback--success{border:1px solid #b9dbc4;color:var(--brand-dark);background:#edf9f0}.vendor-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px}.vendor-card{display:grid;gap:18px;padding:22px;border:1px solid var(--line);border-radius:18px;background:white;box-shadow:0 8px 28px rgba(22,51,32,.05)}.vendor-card h2{margin:10px 0 4px;font-size:1.2rem}.vendor-card p{margin:0}.status{display:inline-block;padding:5px 8px;border-radius:8px;color:var(--brand);background:var(--brand-soft);font-size:.7rem;font-weight:800;text-transform:uppercase}.status.inactive{color:#8b3831;background:#fff0ee}dl{display:grid;gap:10px;margin:0}dl div{display:flex;justify-content:space-between;gap:14px;padding-top:10px;border-top:1px solid #edf0ed}dt{color:var(--muted);font-size:.76rem}dd{margin:0;text-align:right;font-weight:800}.actions{display:flex;gap:10px;flex-wrap:wrap}.button--danger{background:#fff0ee;color:#8b3831}
+.page-heading{margin-bottom:24px}.page-heading p{margin:0}.list-state{margin-top:24px}.feedback{display:inline-block;margin:0 0 16px;padding:10px 13px;border-radius:999px;font-size:.8rem;font-weight:800}.feedback--success{border:1px solid #b9dbc4;color:var(--brand-dark);background:#edf9f0}.vendor-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px}.vendor-card{display:grid;gap:18px;padding:22px;border:1px solid var(--line);border-radius:18px;background:white;box-shadow:0 8px 28px rgba(22,51,32,.05)}.vendor-card h2{margin:10px 0 4px;font-size:1.2rem}.vendor-card p{margin:0}.status{display:inline-block;padding:5px 8px;border-radius:8px;color:var(--brand);background:var(--brand-soft);font-size:.7rem;font-weight:800;text-transform:uppercase}.status.inactive{color:#8b3831;background:#fff0ee}dl{display:grid;gap:10px;margin:0}dl div{display:flex;justify-content:space-between;gap:14px;padding-top:10px;border-top:1px solid #edf0ed}dt{color:var(--muted);font-size:.76rem}dd{margin:0;text-align:right;font-weight:800}.actions{display:flex;gap:10px;flex-wrap:wrap}
 @media(max-width:900px){.vendor-grid{grid-template-columns:repeat(2,1fr)}}@media(max-width:560px){.vendor-grid{grid-template-columns:1fr}}
 </style>
