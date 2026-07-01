@@ -33,9 +33,9 @@
         </dl>
         <div class="actions">
           <button class="button button--small" :disabled="updatingId === vendor.id" @click="toggleVendor(vendor)">
-            {{ updatingId === vendor.id ? 'Updating...' : vendor.is_active ? 'Deactivate' : 'Activate' }}
+            {{ updatingId === vendor.id ? 'Updating...' : vendor.is_active ? 'Deactivate' : 'Restore' }}
           </button>
-          <button class="button button--small button--danger" :disabled="removingId === vendor.id" @click="removeVendor(vendor)">
+          <button v-if="vendor.is_active" class="button button--small button--danger" :disabled="removingId === vendor.id" @click="removeVendor(vendor)">
             {{ removingId === vendor.id ? 'Removing...' : 'Remove' }}
           </button>
         </div>
@@ -83,17 +83,13 @@ async function toggleVendor(vendor) {
 }
 
 async function removeVendor(vendor) {
-  if (!window.confirm(`Remove ${vendor.name}? Vendors with order history will be deactivated instead.`)) return
+  if (!window.confirm(`Remove ${vendor.name} from public listings? You can restore it later.`)) return
   removingId.value = vendor.id
   message.value = ''
   error.value = ''
   try {
     const { data } = await api.delete(`/admin/vendors/${vendor.id}`)
-    if (data.vendor?.deleted) {
-      vendors.value = vendors.value.filter((item) => item.id !== vendor.id)
-    } else {
-      vendor.is_active = false
-    }
+    vendor.is_active = false
     message.value = data.message || `${vendor.name} removed.`
   } catch (requestError) {
     error.value = requestError.response?.data?.error || 'Vendor could not be removed.'

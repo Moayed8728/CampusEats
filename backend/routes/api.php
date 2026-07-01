@@ -1603,40 +1603,15 @@ $app->delete('/api/admin/vendors/{id}', function (
         return jsonResponse($response, ['error' => 'Vendor not found'], 404);
     }
 
-    $orders = $db->prepare('SELECT COUNT(*) FROM orders WHERE vendor_id = ?');
-    $orders->execute([$args['id']]);
-    if ((int) $orders->fetchColumn() > 0) {
-        $db->prepare('UPDATE vendors SET is_active = 0 WHERE id = ?')->execute([$args['id']]);
-        return jsonResponse($response, [
-            'message' => 'Vendor has order history, so it was removed from public listings instead of hard-deleted.',
-            'vendor' => [
-                'id' => $args['id'],
-                'name' => $vendor['name'],
-                'is_active' => false,
-                'deleted' => false,
-            ],
-        ]);
-    }
-
-    try {
-        $db->beginTransaction();
-        $db->prepare('DELETE FROM menu_items WHERE vendor_id = ?')->execute([$args['id']]);
-        $db->prepare('DELETE FROM vendors WHERE id = ?')->execute([$args['id']]);
-        $db->prepare("UPDATE users SET role = 'student' WHERE id = ? AND role = 'vendor'")->execute([$vendor['owner_id']]);
-        $db->commit();
-    } catch (Throwable $e) {
-        if ($db->inTransaction()) {
-            $db->rollBack();
-        }
-        throw $e;
-    }
+    $db->prepare('UPDATE vendors SET is_active = 0 WHERE id = ?')->execute([$args['id']]);
 
     return jsonResponse($response, [
-        'message' => 'Vendor deleted',
+        'message' => 'Vendor removed from public listings. You can restore it anytime.',
         'vendor' => [
             'id' => $args['id'],
             'name' => $vendor['name'],
-            'deleted' => true,
+            'is_active' => false,
+            'deleted' => false,
         ],
     ]);
 })->add(new RoleMiddleware(['admin']))->add(new JwtMiddleware());
