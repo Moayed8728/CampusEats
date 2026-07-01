@@ -19,6 +19,20 @@ CREATE TABLE IF NOT EXISTS vendors (
     CONSTRAINT fk_vendors_owner FOREIGN KEY (owner_id) REFERENCES users(id)
 );
 
+CREATE TABLE IF NOT EXISTS vendor_applications (
+    id CHAR(36) PRIMARY KEY,
+    user_id CHAR(36) NOT NULL,
+    vendor_name VARCHAR(160) NOT NULL,
+    description TEXT NOT NULL,
+    location VARCHAR(160) NOT NULL,
+    opening_hours VARCHAR(120) NOT NULL,
+    status ENUM('pending','approved','rejected') NOT NULL DEFAULT 'pending',
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT fk_vendor_applications_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    INDEX idx_vendor_applications_user (user_id),
+    INDEX idx_vendor_applications_status (status, created_at)
+);
+
 SET @add_location = (
     SELECT IF(
         COUNT(*) = 0,

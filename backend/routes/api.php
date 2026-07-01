@@ -51,6 +51,26 @@ $findOwnedVendor = static function (PDO $db, string $userId): ?array {
     return $statement->fetch() ?: null;
 };
 
+$fetchVendorApplications = static function (PDO $db, ?string $applicationId = null): array {
+    $sql = 'SELECT va.id, va.user_id, u.name AS applicant_name, u.email AS applicant_email,
+                   va.vendor_name, va.description, va.location, va.opening_hours,
+                   va.status, va.created_at
+            FROM vendor_applications va
+            JOIN users u ON u.id = va.user_id';
+    $params = [];
+
+    if ($applicationId !== null) {
+        $sql .= ' WHERE va.id = ?';
+        $params[] = $applicationId;
+    }
+
+    $sql .= ' ORDER BY va.created_at DESC';
+    $statement = $db->prepare($sql);
+    $statement->execute($params);
+
+    return $statement->fetchAll();
+};
+
 $fetchVendorOrders = static function (PDO $db, string $vendorId) use ($fetchOrder): array {
     $statement = $db->prepare('SELECT id FROM orders WHERE vendor_id = ? ORDER BY created_at DESC');
     $statement->execute([$vendorId]);
@@ -249,6 +269,68 @@ $parseAiQuery = static function (string $query) use ($normalizeCategory): array 
     return $parsed;
 };
 
+$looksLikeWords = static function (string $value): bool {
+    return (bool) preg_match('/[a-z0-9]/i', $value)
+        && (bool) preg_match('/[a-z]{2,}/i', $value)
+        && !preg_match('/^[^a-z0-9]+$/i', $value);
+};
+
+$isRealisticOpeningHours = static function (string $value): bool {
+    $value = trim($value);
+    if (strlen($value) < 7 || strlen($value) > 120) {
+        return false;
+    }
+    if (!preg_match('/\b(am|pm)\b/i', $value) || !str_contains($value, '-')) {
+        return false;
+    }
+    if (!preg_match('/(?:mon|tue|wed|thu|fri|sat|sun|monday|tuesday|wednesday|thursday|friday|saturday|sunday|daily|\d{1,2}(?::\d{2})?\s*(?:am|pm))/i', $value)) {
+        return false;
+    }
+
+    preg_match_all('/(?<!\d)(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b/i', $value, $matches, PREG_SET_ORDER);
+    if (count($matches) < 2) {
+        return false;
+    }
+    foreach ($matches as $match) {
+        $hour = (int) $match[1];
+        $minute = isset($match[2]) && $match[2] !== '' ? (int) $match[2] : 0;
+        if ($hour < 1 || $hour > 12 || $minute < 0 || $minute > 59) {
+            return false;
+        }
+    }
+
+    return true;
+};
+
+$validateVendorApplicationData = static function (array $data) use ($looksLikeWords, $isRealisticOpeningHours): array {
+    $clean = [
+        'vendor_name' => trim((string) ($data['vendor_name'] ?? '')),
+        'description' => trim((string) ($data['description'] ?? '')),
+        'location' => trim((string) ($data['location'] ?? '')),
+        'opening_hours' => trim((string) ($data['opening_hours'] ?? '')),
+    ];
+    $errors = [];
+
+    if (strlen($clean['vendor_name']) < 3 || strlen($clean['vendor_name']) > 160 || !$looksLikeWords($clean['vendor_name'])) {
+        $errors['vendor_name'] = 'Vendor name must be 3-160 characters and include readable text.';
+    }
+    if (strlen($clean['description']) < 20 || strlen($clean['description']) > 500) {
+        $errors['description'] = 'Description must be 20-500 characters.';
+    }
+    if (strlen($clean['location']) < 3 || strlen($clean['location']) > 160 || !$looksLikeWords($clean['location'])) {
+        $errors['location'] = 'Location must be 3-160 characters and include readable text.';
+    }
+    if (!$isRealisticOpeningHours($clean['opening_hours'])) {
+        $errors['opening_hours'] = 'Opening hours must look like 9:00 AM - 5:00 PM or Mon-Fri 9:00 AM - 5:00 PM.';
+    }
+
+    if ($errors) {
+        throw new InvalidArgumentException(json_encode($errors));
+    }
+
+    return $clean;
+};
+
 $normalizePaymentData = static function (array $data): array {
     $paymentStatus = strtolower(trim((string) ($data['payment_status'] ?? 'mock_paid')));
     $paymentMethod = strtolower(trim((string) ($data['payment_method'] ?? 'mock')));
@@ -315,20 +397,17 @@ $app->get('/api/health', function (ServerRequestInterface $request, ResponseInte
 
 $app->post('/api/auth/register', function (ServerRequestInterface $request, ResponseInterface $response) {
     $data = (array) $request->getParsedBody();
-    $missing = validateRequiredFields($data, ['name', 'email', 'password', 'role']);
+    $missing = validateRequiredFields($data, ['name', 'email', 'password']);
 
     if ($missing) {
         return jsonResponse($response, ['error' => 'Missing required fields', 'fields' => $missing], 400);
     }
 
     $email = strtolower(trim((string) $data['email']));
-    $role = strtolower(trim((string) $data['role']));
+    $role = 'student';
 
     if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
         return jsonResponse($response, ['error' => 'A valid email is required'], 400);
-    }
-    if (!in_array($role, ['student', 'vendor', 'admin'], true)) {
-        return jsonResponse($response, ['error' => 'Role must be student, vendor, or admin'], 400);
     }
     if (strlen((string) $data['password']) < 6) {
         return jsonResponse($response, ['error' => 'Password must be at least 6 characters'], 400);
@@ -830,6 +909,80 @@ $app->get('/api/rewards', function (
     ]);
 })->add(new RoleMiddleware(['student']))->add(new JwtMiddleware());
 
+$app->get('/api/vendor-applications/me', function (
+    ServerRequestInterface $request,
+    ResponseInterface $response
+) use ($fetchVendorApplications) {
+    $db = Database::connect();
+    $auth = getAuthUser($request);
+    $statement = $db->prepare(
+        'SELECT id FROM vendor_applications WHERE user_id = ? ORDER BY created_at DESC LIMIT 1'
+    );
+    $statement->execute([$auth['sub']]);
+    $applicationId = $statement->fetchColumn();
+
+    return jsonResponse($response, [
+        'application' => $applicationId ? ($fetchVendorApplications($db, $applicationId)[0] ?? null) : null,
+        'role' => $auth['role'] ?? null,
+    ]);
+})->add(new JwtMiddleware());
+
+$app->post('/api/vendor-applications', function (
+    ServerRequestInterface $request,
+    ResponseInterface $response
+) use ($validateVendorApplicationData) {
+    $data = (array) $request->getParsedBody();
+    try {
+        $clean = $validateVendorApplicationData($data);
+    } catch (InvalidArgumentException $e) {
+        return jsonResponse($response, [
+            'error' => 'Please check your vendor application details.',
+            'fields' => json_decode($e->getMessage(), true) ?: [],
+        ], 400);
+    }
+
+    $db = Database::connect();
+    $auth = getAuthUser($request);
+    $pending = $db->prepare("SELECT id FROM vendor_applications WHERE user_id = ? AND status = 'pending' LIMIT 1");
+    $pending->execute([$auth['sub']]);
+    if ($pending->fetch()) {
+        return jsonResponse($response, ['error' => 'Your vendor application is currently under review.'], 400);
+    }
+
+    $existingVendor = $db->prepare('SELECT id FROM vendors WHERE owner_id = ?');
+    $existingVendor->execute([$auth['sub']]);
+    if ($existingVendor->fetch()) {
+        return jsonResponse($response, ['error' => 'Your vendor application has been approved.'], 400);
+    }
+
+    $application = [
+        'id' => uuid(),
+        'user_id' => $auth['sub'],
+        'vendor_name' => $clean['vendor_name'],
+        'description' => $clean['description'],
+        'location' => $clean['location'],
+        'opening_hours' => $clean['opening_hours'],
+        'status' => 'pending',
+    ];
+
+    $statement = $db->prepare(
+        'INSERT INTO vendor_applications
+            (id, user_id, vendor_name, description, location, opening_hours, status)
+         VALUES (?, ?, ?, ?, ?, ?, ?)'
+    );
+    $statement->execute([
+        $application['id'],
+        $application['user_id'],
+        $application['vendor_name'],
+        $application['description'],
+        $application['location'],
+        $application['opening_hours'],
+        $application['status'],
+    ]);
+
+    return jsonResponse($response, ['application' => $application], 201);
+})->add(new RoleMiddleware(['student']))->add(new JwtMiddleware());
+
 $app->get('/api/vendor/orders', function (
     ServerRequestInterface $request,
     ResponseInterface $response
@@ -1104,6 +1257,100 @@ $app->get('/api/admin/vendors', function (ServerRequestInterface $request, Respo
     }, $vendors);
 
     return jsonResponse($response, ['vendors' => $vendors]);
+})->add(new RoleMiddleware(['admin']))->add(new JwtMiddleware());
+
+$app->get('/api/admin/vendor-applications', function (
+    ServerRequestInterface $request,
+    ResponseInterface $response
+) use ($fetchVendorApplications) {
+    $db = Database::connect();
+
+    return jsonResponse($response, [
+        'applications' => $fetchVendorApplications($db),
+    ]);
+})->add(new RoleMiddleware(['admin']))->add(new JwtMiddleware());
+
+$app->patch('/api/admin/vendor-applications/{id}/approve', function (
+    ServerRequestInterface $request,
+    ResponseInterface $response,
+    array $args
+) use ($fetchVendorApplications) {
+    $db = Database::connect();
+
+    try {
+        $db->beginTransaction();
+        $statement = $db->prepare(
+            "SELECT va.*, u.role
+             FROM vendor_applications va
+             JOIN users u ON u.id = va.user_id
+             WHERE va.id = ? FOR UPDATE"
+        );
+        $statement->execute([$args['id']]);
+        $application = $statement->fetch();
+
+        if (!$application) {
+            $db->rollBack();
+            return jsonResponse($response, ['error' => 'Vendor application not found'], 404);
+        }
+        if ($application['status'] !== 'pending') {
+            $db->rollBack();
+            return jsonResponse($response, ['error' => 'Only pending applications can be approved'], 400);
+        }
+
+        $existingVendor = $db->prepare('SELECT id FROM vendors WHERE owner_id = ?');
+        $existingVendor->execute([$application['user_id']]);
+        if ($existingVendor->fetch()) {
+            $db->rollBack();
+            return jsonResponse($response, ['error' => 'Applicant already owns a vendor profile'], 400);
+        }
+
+        $vendorId = uuid();
+        $vendor = $db->prepare(
+            'INSERT INTO vendors (id, owner_id, name, description, location, opening_hours, is_active)
+             VALUES (?, ?, ?, ?, ?, ?, 1)'
+        );
+        $vendor->execute([
+            $vendorId,
+            $application['user_id'],
+            $application['vendor_name'],
+            $application['description'],
+            $application['location'],
+            $application['opening_hours'],
+        ]);
+
+        $db->prepare("UPDATE users SET role = 'vendor' WHERE id = ?")->execute([$application['user_id']]);
+        $db->prepare("UPDATE vendor_applications SET status = 'approved' WHERE id = ?")->execute([$args['id']]);
+        $db->commit();
+    } catch (Throwable $e) {
+        if ($db->inTransaction()) {
+            $db->rollBack();
+        }
+        throw $e;
+    }
+
+    return jsonResponse($response, [
+        'message' => 'Vendor application approved',
+        'application' => $fetchVendorApplications($db, $args['id'])[0] ?? null,
+    ]);
+})->add(new RoleMiddleware(['admin']))->add(new JwtMiddleware());
+
+$app->patch('/api/admin/vendor-applications/{id}/reject', function (
+    ServerRequestInterface $request,
+    ResponseInterface $response,
+    array $args
+) use ($fetchVendorApplications) {
+    $db = Database::connect();
+    $statement = $db->prepare("UPDATE vendor_applications SET status = 'rejected' WHERE id = ? AND status = 'pending'");
+    $statement->execute([$args['id']]);
+
+    if ($statement->rowCount() === 0) {
+        return jsonResponse($response, ['error' => 'Pending vendor application not found'], 404);
+    }
+
+    return jsonResponse($response, [
+        'message' => 'Vendor application rejected',
+        'application' => $fetchVendorApplications($db, $args['id'])[0] ?? null,
+    ]);
 })->add(new RoleMiddleware(['admin']))->add(new JwtMiddleware());
 
 $app->patch('/api/admin/vendors/{id}/toggle-active', function (
