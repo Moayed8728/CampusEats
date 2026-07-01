@@ -7,6 +7,7 @@ import CartPage from '../views/CartPage.vue'
 import OrderStatus from '../views/OrderStatus.vue'
 import VendorDashboard from '../views/VendorDashboard.vue'
 import VendorAnalytics from '../views/VendorAnalytics.vue'
+import VendorMenuManager from '../views/VendorMenuManager.vue'
 import OrderTracking from '../views/OrderTracking.vue'
 import OrderHistory from '../views/OrderHistory.vue'
 import AdminPage from '../views/AdminPage.vue'
@@ -36,6 +37,7 @@ const routes = [
   { path: '/orders/:id/tracking', name: 'order-tracking', component: OrderTracking, meta: { requiresAuth: true, roles: ['student'] } },
   { path: '/orders/:id', name: 'order-status', component: OrderStatus, meta: { requiresAuth: true } },
   { path: '/vendor/dashboard', name: 'vendor-dashboard', component: VendorDashboard, meta: { requiresAuth: true, roles: ['vendor'] } },
+  { path: '/vendor/menu', name: 'vendor-menu-manager', component: VendorMenuManager, meta: { requiresAuth: true, roles: ['vendor'] } },
   { path: '/vendor/analytics', name: 'vendor-analytics', component: VendorAnalytics, meta: { requiresAuth: true, roles: ['vendor'] } },
   { path: '/admin', name: 'admin', component: AdminPage, meta: { requiresAuth: true, roles: ['admin'] } },
   { path: '/admin/users', name: 'admin-users', component: AdminUsers, meta: { requiresAuth: true, roles: ['admin'] } },

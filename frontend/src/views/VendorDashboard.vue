@@ -4,7 +4,7 @@
       <div>
         <span class="eyebrow">{{ todayLabel }}</span>
         <h1>Good {{ greeting }}.</h1>
-        <p>Here’s what’s happening at Campus Nasi Corner today.</p>
+        <p>Here’s what’s happening at {{ vendorName }} today.</p>
       </div>
       <span class="open-badge"><span></span> Store is open</span>
     </div>
@@ -81,6 +81,7 @@ import api from '../services/api'
 
 const router = useRouter()
 const orders = ref([])
+const vendorName = ref('your storefront')
 const loading = ref(true)
 const error = ref('')
 const successMessage = ref('')
@@ -101,6 +102,7 @@ async function fetchOrders({ quiet = false } = {}) {
 
   try {
     const { data } = await api.get('/vendor/orders')
+    vendorName.value = data.vendor?.name || vendorName.value
     orders.value = data.orders ?? []
   } catch (requestError) {
     if (requestError.response?.status === 401) {

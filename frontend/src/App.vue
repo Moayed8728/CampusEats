@@ -14,7 +14,7 @@
           <RouterLink to="/vendor-application">Apply as Vendor</RouterLink>
           <RouterLink to="/orders/history">Order History</RouterLink>
         </template>
-        <template v-if="auth.role==='vendor'"><RouterLink to="/vendor/dashboard">Dashboard</RouterLink><RouterLink to="/vendor/analytics">Analytics</RouterLink></template>
+        <template v-if="auth.role==='vendor'"><RouterLink to="/vendor/dashboard">Dashboard</RouterLink><RouterLink to="/vendor/menu">Menu</RouterLink><RouterLink to="/vendor/analytics">Analytics</RouterLink></template>
         <template v-if="auth.role==='admin'"><RouterLink to="/admin">Dashboard</RouterLink><RouterLink to="/admin/users">Users</RouterLink><RouterLink to="/admin/vendors">Vendors</RouterLink><RouterLink to="/admin/vendor-applications">Vendor Applications</RouterLink><RouterLink to="/admin/rewards">Rewards</RouterLink><RouterLink to="/admin/orders">Orders</RouterLink></template>
       </nav>
       <div class="account-actions">
